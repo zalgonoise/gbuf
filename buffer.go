@@ -242,7 +242,7 @@ func (b *Buffer[T]) WriteTo(w gio.Writer[T]) (n int64, err error) {
 	return n, nil
 }
 
-// WriteT item appends the T item c to the buffer, growing the buffer as needed.
+// WriteItem appends the T `item` to the buffer, growing the buffer as needed.
 // The returned error is always nil, but is included to match gio.Writer's
 // WriteItem. If the buffer becomes too large, WriteItem will panic with
 // ErrTooLarge.
@@ -296,7 +296,7 @@ func (b *Buffer[T]) Next(n int) []T {
 	return data
 }
 
-// ReadT item reads and returns the next T item from the buffer.
+// ReadItem reads and returns the next T item from the buffer.
 // If no T item is available, it returns error io.EOF.
 func (b *Buffer[T]) ReadItem() (T, error) {
 	if b.empty() {
