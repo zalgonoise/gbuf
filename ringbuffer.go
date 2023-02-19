@@ -299,6 +299,27 @@ func (r *RingBuffer[T]) ReadItem() (item T, err error) {
 	return item, nil
 }
 
+// Seek implements the gio.Seeker interface. All valid whence will point to
+// the current cursor's (read) position
+func (r *RingBuffer[T]) Seek(offset int64, whence int) (int64, error) {
+	var abs int64
+	switch whence {
+	case gio.SeekStart, gio.SeekCurrent, gio.SeekEnd:
+		if (r.start + int(offset)) < len(r.items) {
+			abs = int64(r.start) + offset
+		} else {
+			abs = offset - int64(len(r.items)-r.start)
+		}
+	default:
+		return 0, errors.New("gbuf.Reader.Seek: invalid whence")
+	}
+	if abs < 0 {
+		return 0, errors.New("gbuf.Reader.Seek: negative position")
+	}
+	r.start = int(abs)
+	return abs, nil
+}
+
 // NewRingBuffer creates a RingBuffer of type `T` and size `size`
 func NewRingBuffer[T any](size int) *RingBuffer[T] {
 	if size <= 0 {
