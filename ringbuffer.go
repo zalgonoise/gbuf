@@ -1,6 +1,13 @@
 package gbuf
 
-import "io"
+import (
+	"errors"
+	"io"
+
+	"github.com/zalgonoise/gio"
+)
+
+const defaultBufferSize = 256
 
 // RingBuffer is a buffer that is connected end-to-end, which allows continuous
 // reads and writes provided that the caller is aware of potential loss of read data
@@ -50,7 +57,7 @@ func (r *RingBuffer[T]) Read(p []T) (n int, err error) {
 	if r.start < r.end {
 		n = copy(p, r.items[r.start:r.end])
 	} else {
-		n = copy(p, r.items[r.start:])
+		n = copy(p, r.items[r.start-1:])
 		if n < len(p) {
 			n += copy(p[n:], r.items[:r.end])
 		}
@@ -59,9 +66,234 @@ func (r *RingBuffer[T]) Read(p []T) (n int, err error) {
 	return n, nil
 }
 
+// Value returns a slice of length b.Len() holding the unread portion of the buffer.
+// The slice is valid for use only until the next buffer modification (that is,
+// only until the next call to a method like Read, Write, Reset, or Truncate).
+func (r *RingBuffer[T]) Value() []T {
+	var (
+		n     int
+		items []T
+	)
+	if r.start == r.end {
+		return nil
+	}
+	if r.start < r.end {
+		items = make([]T, r.end-r.start)
+		n = copy(items, r.items[r.start:r.end])
+	} else {
+		items = make([]T, len(r.items))
+		n = copy(items, r.items[r.start-1:])
+		if n < len(items) {
+			n += copy(items[n:], r.items[:r.end])
+		}
+	}
+	r.start = (r.start + n) % len(r.items)
+	return items
+}
+
+// Len returns the number of T items of the unread portion of the buffer;
+// b.Len() == len(b.T items()).
+func (r *RingBuffer[T]) Len() int {
+	if r.start < r.end {
+		return r.end - r.start
+	}
+	return len(r.items)
+}
+
+// Cap returns the length of the buffer's underlying T item slice, that is, the
+// total ring buffer's capacity.
+func (r *RingBuffer[T]) Cap() int {
+	return len(r.items)
+}
+
+// Truncate discards all but the first n unread T items from the buffer
+// but continues to use the same allocated storage.
+// It panics if n is negative or greater than the length of the buffer.
+func (r *RingBuffer[T]) Truncate(n int) {
+	if n == 0 {
+		r.Reset()
+		return
+	}
+	if n < 0 || n > r.Len() {
+		panic("gbuf.RingBuffer: truncation out of range")
+	}
+	if r.start < r.end {
+		r.items = append([]T{}, r.items[r.start+n:r.end]...)
+		r.start = 0
+		r.end = len(r.items)
+		return
+	}
+	r.items = append([]T{}, r.items[r.start-1:]...)
+	r.items = append(r.items, r.items[:r.end]...)
+	r.items = r.items[n:]
+	r.start = 0
+	r.end = len(r.items)
+}
+
+// Reset resets the buffer to be empty,
+// but it retains the underlying storage for use by future writes.
+// Reset is the same as Truncate(0).
+func (r *RingBuffer[T]) Reset() {
+	r.items = r.items[:0]
+	r.start = 0
+	r.end = 0
+}
+
+func (r *RingBuffer[T]) ReadFrom(b gio.Reader[T]) (n int, err error) {
+	for {
+		if r.start < r.end {
+			num, err := b.Read(r.items[r.start:r.end])
+			if n < 0 {
+				panic(errNegativeRead)
+			}
+			n += num
+			if errors.Is(err, io.EOF) {
+				return n, nil
+			}
+			if err != nil {
+				return n, err
+			}
+		} else {
+			num, err := b.Read(r.items[r.start:len(r.items)])
+			if n < 0 {
+				panic(errNegativeRead)
+			}
+			n += num
+			if errors.Is(err, io.EOF) {
+				return n, nil
+			}
+			if err != nil {
+				return n, err
+			}
+			num, err = b.Read(r.items[:r.end])
+			if n < 0 {
+				panic(errNegativeRead)
+			}
+			n += num
+			if errors.Is(err, io.EOF) {
+				return n, nil
+			}
+			if err != nil {
+				return n, err
+			}
+		}
+	}
+}
+
+func (r *RingBuffer[T]) WriteTo(b gio.Writer[T]) (n int, err error) {
+	for {
+		if r.start < r.end {
+			num, err := b.Write(r.items[r.start:r.end])
+			if n < 0 {
+				panic(errNegativeRead)
+			}
+			n += num
+			if errors.Is(err, io.EOF) {
+				return n, nil
+			}
+			if err != nil {
+				return n, err
+			}
+		} else {
+			num, err := b.Write(r.items[r.start:len(r.items)])
+			if n < 0 {
+				panic(errNegativeRead)
+			}
+			n += num
+			if errors.Is(err, io.EOF) {
+				return n, nil
+			}
+			if err != nil {
+				return n, err
+			}
+			num, err = b.Write(r.items[:r.end])
+			if n < 0 {
+				panic(errNegativeRead)
+			}
+			n += num
+			if errors.Is(err, io.EOF) {
+				r.Reset()
+				return n, nil
+			}
+			if err != nil {
+				return n, err
+			}
+		}
+	}
+}
+
+func (r *RingBuffer[T]) Next(n int) []T {
+	if n == 0 {
+		return nil
+	}
+	if n < 0 || n > r.Len() {
+		panic("gbuf.RingBuffer: out of range")
+	}
+
+	if r.start+n < r.end {
+		items := make([]T, 0, n)
+		items = append(items, r.items[r.start:r.start+n]...)
+		r.start += n
+		return items
+	}
+
+	items := make([]T, 0, n)
+	items = append(items, r.items[r.start-1:]...)
+	items = append(items, r.items[:n]...)
+	r.start = n
+	return items
+}
+
+func (r *RingBuffer[T]) UnreadItem() error {
+	if r.start == r.end {
+		return ErrUnreadItem
+	}
+	r.start--
+	return nil
+}
+
+func (r *RingBuffer[T]) ReadItems(delim func(T) bool) (line []T, err error) {
+	if r.start == r.end {
+		return line, io.EOF
+	}
+	if r.start < r.end {
+		var i int
+		for i = r.start; i < r.end; i++ {
+			if delim(r.items[i]) {
+				break
+			}
+		}
+		line = append(line, r.items[r.start:r.start+i+1]...)
+		r.start += i + 1
+		return line, nil
+	}
+
+	var i int
+	var done bool
+	for i = r.start; i < len(r.items); i++ {
+		if delim(r.items[i]) {
+			done = true
+			break
+		}
+	}
+	line = append(line, r.items[r.start:r.start+i+1]...)
+	if !done {
+		for i = 0; i < r.end; i++ {
+			if delim(r.items[i]) {
+				break
+			}
+		}
+		line = append(line, r.items[r.start:r.start+i+1]...)
+	}
+	return line, nil
+}
+
 // ReadItem reads and returns the next T item from the buffer.
 // If no T item is available, it returns error io.EOF.
 func (r *RingBuffer[T]) ReadItem() (item T, err error) {
+	if r.start == r.end {
+		return item, io.EOF
+	}
 	item = r.items[r.start]
 	r.start = (r.start + 1) % len(r.items)
 	return item, nil
@@ -69,6 +301,9 @@ func (r *RingBuffer[T]) ReadItem() (item T, err error) {
 
 // NewRingBuffer creates a RingBuffer of type `T` and size `size`
 func NewRingBuffer[T any](size int) *RingBuffer[T] {
+	if size <= 0 {
+		size = defaultBufferSize
+	}
 	return &RingBuffer[T]{
 		items: make([]T, size),
 	}
