@@ -311,10 +311,10 @@ func (r *RingBuffer[T]) Seek(offset int64, whence int) (int64, error) {
 			abs = offset - int64(len(r.items)-r.start)
 		}
 	default:
-		return 0, errors.New("gbuf.Reader.Seek: invalid whence")
+		return 0, errors.New("gbuf.RingBuffer.Seek: invalid whence")
 	}
 	if abs < 0 {
-		return 0, errors.New("gbuf.Reader.Seek: negative position")
+		return 0, errors.New("gbuf.RingBuffer.Seek: negative position")
 	}
 	r.start = int(abs)
 	return abs, nil
