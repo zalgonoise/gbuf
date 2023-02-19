@@ -43,7 +43,7 @@ var errNegativeRead = errors.New("gbuf.Buffer: reader returned negative count fr
 
 const maxInt = int(^uint(0) >> 1)
 
-// T items returns a slice of length b.Len() holding the unread portion of the buffer.
+// Value returns a slice of length b.Len() holding the unread portion of the buffer.
 // The slice is valid for use only until the next buffer modification (that is,
 // only until the next call to a method like Read, Write, Reset, or Truncate).
 // The slice aliases the buffer content at least until the next buffer modification,
@@ -54,7 +54,7 @@ func (b *Buffer[T]) Value() []T { return b.buf[b.off:] }
 func (b *Buffer[T]) empty() bool { return len(b.buf) <= b.off }
 
 // Len returns the number of T items of the unread portion of the buffer;
-// b.Len() == len(b.T items()).
+// b.Len() == len(b.Value()).
 func (b *Buffer[T]) Len() int { return len(b.buf) - b.off }
 
 // Cap returns the capacity of the buffer's underlying T item slice, that is, the
@@ -328,7 +328,7 @@ func (b *Buffer[T]) UnreadItem() error {
 	return nil
 }
 
-// ReadT items reads until the first occurrence of delim in the input,
+// ReadItems reads until the first occurrence of delim in the input,
 // returning a slice containing the data up to and including the delimiter.
 // If ReadT items encounters an error before finding a delimiter,
 // it returns the data read before the error and the error itself (often io.EOF).
@@ -342,7 +342,7 @@ func (b *Buffer[T]) ReadItems(delim func(T) bool) (line []T, err error) {
 	return line, err
 }
 
-// readSlice is like ReadT items but returns a reference to internal buffer data.
+// readSlice is like ReadItems but returns a reference to internal buffer data.
 func (b *Buffer[T]) readSlice(delim func(T) bool) (line []T, err error) {
 	var (
 		idx int
