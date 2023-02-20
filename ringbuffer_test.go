@@ -6,6 +6,55 @@ import (
 	"testing"
 )
 
+func BenchmarkRingBufferReadWrite(b *testing.B) {
+	b.Run("Short", func(b *testing.B) {
+		input := []byte("works")
+		r := NewRingBuffer[byte](5)
+
+		for i := 0; i < b.N; i++ {
+			_, err := r.Write(input)
+			if err != nil {
+				b.Error(err)
+			}
+		}
+		_ = r.Value()
+	})
+
+	b.Run("Write", func(b *testing.B) {
+		input := []byte("very long and continuous string that will overflow the buffer a few times, it will take some time in terms of ns per operation but it should stay at zero allocations")
+		r := NewRingBuffer[byte](5)
+
+		for i := 0; i < b.N; i++ {
+			_, err := r.Write(input)
+			if err != nil {
+				b.Error(err)
+			}
+		}
+		_ = r.Value()
+	})
+
+	b.Run("ReadWrite", func(b *testing.B) {
+		input := []byte("very long and continuous string that will overflow the buffer a few times, it will take some time in terms of ns per operation but it should stay at zero allocations")
+		r := NewRingBuffer[byte](5)
+		var item byte
+
+		for i := 0; i < b.N; i++ {
+			for idx := range input {
+				err := r.WriteItem(input[idx])
+				if err != nil {
+					b.Error(err)
+				}
+				item, err = r.ReadItem()
+				if err != nil {
+					b.Error(err)
+				}
+			}
+		}
+		_ = item
+	})
+
+}
+
 func TestRingBufferWrite(t *testing.T) {
 	t.Run("Success", func(t *testing.T) {
 		input := []byte("hello world")
