@@ -134,7 +134,6 @@ func (r *RingBuffer[T]) Truncate(n int) {
 // but it retains the underlying storage for use by future writes.
 // Reset is the same as Truncate(0).
 func (r *RingBuffer[T]) Reset() {
-	r.items = r.items[:0]
 	r.start = 0
 	r.end = 0
 }
