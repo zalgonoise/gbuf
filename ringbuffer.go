@@ -138,6 +138,10 @@ func (r *RingBuffer[T]) Reset() {
 	r.end = 0
 }
 
+// ReadFrom reads data from b until EOF and appends it to the buffer, cycling
+// the buffer as needed. Any unready bytes will be overwritten on each cycle.
+// The return value n is the number of T items read. Any error except io.EOF
+// encountered during the read is also returned.
 func (r *RingBuffer[T]) ReadFrom(b gio.Reader[T]) (n int, err error) {
 	for {
 		if r.start < r.end {
