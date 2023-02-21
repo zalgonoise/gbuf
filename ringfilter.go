@@ -11,10 +11,10 @@ import (
 // reads and writes where the caller configures a callback function to process
 // all items on each loop
 type RingFilter[T any] struct {
-	items []T
 	start int
 	end   int
 	fn    func([]T) error
+	items []T
 }
 
 // Write sets the contents of `p` to the buffer, in sequential order.

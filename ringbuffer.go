@@ -13,9 +13,9 @@ const defaultBufferSize = 256
 // reads and writes provided that the caller is aware of potential loss of read data
 // (as elements are overwritten if not read)
 type RingBuffer[T any] struct {
-	items []T
 	start int
 	end   int
+	items []T
 }
 
 // Write sets the contents of `p` to the buffer, in sequential order,
