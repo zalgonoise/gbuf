@@ -106,33 +106,14 @@ func (r *RingBuffer[T]) Cap() int {
 	return len(r.items)
 }
 
-// Truncate discards all but the first n unread T items from the buffer
-// but continues to use the same allocated storage.
-// It panics if n is negative or greater than the length of the buffer.
+// Truncate serves as an alias to Reset(); to preserve the ring buffer size
 func (r *RingBuffer[T]) Truncate(n int) {
-	if n == 0 {
-		r.Reset()
-		return
-	}
-	if n < 0 || n > r.Len() {
-		panic("gbuf.RingBuffer: truncation out of range")
-	}
-	if r.start < r.end {
-		r.items = append([]T{}, r.items[r.start+n:r.end]...)
-		r.start = 0
-		r.end = len(r.items)
-		return
-	}
-	r.items = append([]T{}, r.items[r.start-1:]...)
-	r.items = append(r.items, r.items[:r.end]...)
-	r.items = r.items[n:]
-	r.start = 0
-	r.end = len(r.items)
+	r.Reset()
 }
 
 // Reset resets the buffer to be empty,
 // but it retains the underlying storage for use by future writes.
-// Reset is the same as Truncate(0).
+// Reset is the same as Truncate().
 func (r *RingBuffer[T]) Reset() {
 	r.start = 0
 	r.end = 0
@@ -142,14 +123,14 @@ func (r *RingBuffer[T]) Reset() {
 // the buffer as needed. Any unready bytes will be overwritten on each cycle.
 // The return value n is the number of T items read. Any error except io.EOF
 // encountered during the read is also returned.
-func (r *RingBuffer[T]) ReadFrom(b gio.Reader[T]) (n int, err error) {
+func (r *RingBuffer[T]) ReadFrom(b gio.Reader[T]) (n int64, err error) {
 	for {
 		if r.start < r.end {
 			num, err := b.Read(r.items[r.start:r.end])
 			if n < 0 {
 				panic(errNegativeRead)
 			}
-			n += num
+			n += int64(num)
 			if errors.Is(err, io.EOF) {
 				return n, nil
 			}
@@ -161,7 +142,7 @@ func (r *RingBuffer[T]) ReadFrom(b gio.Reader[T]) (n int, err error) {
 			if n < 0 {
 				panic(errNegativeRead)
 			}
-			n += num
+			n += int64(num)
 			if errors.Is(err, io.EOF) {
 				return n, nil
 			}
@@ -172,7 +153,7 @@ func (r *RingBuffer[T]) ReadFrom(b gio.Reader[T]) (n int, err error) {
 			if n < 0 {
 				panic(errNegativeRead)
 			}
-			n += num
+			n += int64(num)
 			if errors.Is(err, io.EOF) {
 				return n, nil
 			}
@@ -183,14 +164,18 @@ func (r *RingBuffer[T]) ReadFrom(b gio.Reader[T]) (n int, err error) {
 	}
 }
 
-func (r *RingBuffer[T]) WriteTo(b gio.Writer[T]) (n int, err error) {
+// WriteTo writes data to w until the buffer is drained or an error occurs.
+// The return value n is the number of T items written; it always fits into an
+// int, but it is int64 to match the gio.WriterTo interface. Any error
+// encountered during the write is also returned.
+func (r *RingBuffer[T]) WriteTo(b gio.Writer[T]) (n int64, err error) {
 	for {
 		if r.start < r.end {
 			num, err := b.Write(r.items[r.start:r.end])
 			if n < 0 {
 				panic(errNegativeRead)
 			}
-			n += num
+			n += int64(num)
 			if errors.Is(err, io.EOF) {
 				return n, nil
 			}
@@ -202,7 +187,7 @@ func (r *RingBuffer[T]) WriteTo(b gio.Writer[T]) (n int, err error) {
 			if n < 0 {
 				panic(errNegativeRead)
 			}
-			n += num
+			n += int64(num)
 			if errors.Is(err, io.EOF) {
 				return n, nil
 			}
@@ -213,7 +198,7 @@ func (r *RingBuffer[T]) WriteTo(b gio.Writer[T]) (n int, err error) {
 			if n < 0 {
 				panic(errNegativeRead)
 			}
-			n += num
+			n += int64(num)
 			if errors.Is(err, io.EOF) {
 				r.Reset()
 				return n, nil
@@ -225,7 +210,7 @@ func (r *RingBuffer[T]) WriteTo(b gio.Writer[T]) (n int, err error) {
 	}
 }
 
-func (r *RingBuffer[T]) Next(n int) []T {
+func (r *RingBuffer[T]) Next(n int) (items []T) {
 	if n == 0 {
 		return nil
 	}
@@ -234,13 +219,11 @@ func (r *RingBuffer[T]) Next(n int) []T {
 	}
 
 	if r.start+n < r.end {
-		items := make([]T, 0, n)
 		items = append(items, r.items[r.start:r.start+n]...)
 		r.start += n
 		return items
 	}
 
-	items := make([]T, 0, n)
 	items = append(items, r.items[r.start-1:]...)
 	items = append(items, r.items[:n]...)
 	r.start = n
@@ -251,7 +234,7 @@ func (r *RingBuffer[T]) UnreadItem() error {
 	if r.start == r.end {
 		return ErrUnreadItem
 	}
-	r.start--
+	r.start = r.start - 1%len(r.items)
 	return nil
 }
 
