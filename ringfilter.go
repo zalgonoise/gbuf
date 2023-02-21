@@ -20,7 +20,11 @@ func (r *RingFilter[T]) Write(p []T) (n int, err error) {
 	for i := range p {
 		r.items[r.end] = p[i]
 		if (r.end+1)%len(r.items) == r.start {
-			r.fn(r.Value())
+			if r.end < len(r.items) {
+				r.end++
+			}
+			r.fn(r.items[r.start:r.end])
+			r.Reset()
 			continue
 		}
 		r.end = (r.end + 1) % len(r.items)
