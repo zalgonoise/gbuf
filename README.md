@@ -22,5 +22,9 @@ But all in all, it was a great exercise to practice using generics. Maybe I will
 
 ## Disclaimer
 
-This library will mirror all logic from Go's (standard) `bytes` library; and change the `[]byte` implementation with a generic `T any` and `[]T` implementation. There are no changes in the actual logic in the library.
+This library will mirror all logic from Go's (standard) `bytes` and `container` libraries; and change the `[]byte` implementation with a generic `T any` and `[]T` implementation. There are no changes in the actual logic in the library.
 ________________
+
+### Added Features
+
+Besides recently adding `container` library generic implementations (heap, list and ring); I've also extended the concept of the circular buffer with the `RingBuffer` type, that is a circular buffer with an `io.Reader` / `io.Writer` implementation (and goodies). Another type similar to this one is `RingFilter` which allows passing a slice of the unread items on each cycle to a given `func([]T) error` -- that allows filtering data / chaining readers / building data processing pipelines.
