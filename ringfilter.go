@@ -1,6 +1,11 @@
 package gbuf
 
-import "io"
+import (
+	"errors"
+	"io"
+
+	"github.com/zalgonoise/gio"
+)
 
 // RingBuffer is a buffer that is connected end-to-end, which allows continuous
 // reads and writes where the caller configures a callback function to process
@@ -9,13 +14,13 @@ type RingFilter[T any] struct {
 	items []T
 	start int
 	end   int
-	fn    func([]T)
+	fn    func([]T) error
 }
 
 // Write sets the contents of `p` to the buffer, in sequential order.
-// The return value n is the length of p; err is always nil. If the
-// index in the buffer has not been yet read, the entire unread buffer
-// value is sent to the configured process function
+// The return value n is the length of p; err comes from the process func.
+// If the index in the buffer has not been yet read, the entire unread
+// buffer value is sent to the configured process function
 func (r *RingFilter[T]) Write(p []T) (n int, err error) {
 	for i := range p {
 		r.items[r.end] = p[i]
@@ -23,8 +28,11 @@ func (r *RingFilter[T]) Write(p []T) (n int, err error) {
 			if r.end < len(r.items) {
 				r.end++
 			}
-			r.fn(r.items[r.start:r.end])
+			err = r.fn(r.items[r.start:r.end])
 			r.Reset()
+			if err != nil && !errors.Is(err, io.EOF) {
+				return i + 1, err
+			}
 			continue
 		}
 		r.end = (r.end + 1) % len(r.items)
@@ -57,6 +65,32 @@ func (r *RingFilter[T]) Read(p []T) (n int, err error) {
 	}
 	r.start = (r.start + n) % len(r.items)
 	return n, nil
+}
+
+// ReadFrom reads data from b until EOF and appends it to the buffer, cycling
+// the buffer as needed. For each complete cycle, the process function is called
+// with the full buffer in the ring, and the ring reset.
+// The return value n is the number of T items read. Any error except io.EOF
+// encountered during the read is also returned.
+func (r *RingFilter[T]) ReadFrom(b gio.Reader[T]) (n int, err error) {
+	for {
+		num, err := b.Read(r.items[r.start:len(r.items)])
+		if n < 0 {
+			panic(errNegativeRead)
+		}
+		if errors.Is(err, io.EOF) {
+			return n, nil
+		}
+		r.end = (r.end + num) % len(r.items)
+		n += num
+		if r.end%len(r.items) == r.start {
+			err = r.fn(r.items[r.start:len(r.items)])
+			r.Reset()
+		}
+		if err != nil && !errors.Is(err, io.EOF) {
+			return n, err
+		}
+	}
 }
 
 // Value returns a slice of length b.Len() holding the unread portion of the buffer.
@@ -103,7 +137,7 @@ func (r *RingFilter[T]) Cap() int {
 }
 
 // NewRingFilter creates a RingFilter of type `T` and size `size`, with process function `fn`
-func NewRingFilter[T any](size int, fn func([]T)) *RingFilter[T] {
+func NewRingFilter[T any](size int, fn func([]T) error) *RingFilter[T] {
 	if size <= 0 {
 		size = defaultBufferSize
 	}
