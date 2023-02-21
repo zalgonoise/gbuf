@@ -40,6 +40,52 @@ func (r *RingFilter[T]) Write(p []T) (n int, err error) {
 	return len(p), nil
 }
 
+// WriteTo writes data to w until the buffer is drained or an error occurs.
+// The return value n is the number of T items written; it always fits into an
+// int, but it is int64 to match the gio.WriterTo interface. Any error
+// encountered during the write is also returned.
+func (r *RingFilter[T]) WriteTo(b gio.Writer[T]) (n int64, err error) {
+	for {
+		if r.start < r.end {
+			num, err := b.Write(r.items[r.start:r.end])
+			if n < 0 {
+				panic(errNegativeRead)
+			}
+			n += int64(num)
+			if errors.Is(err, io.EOF) {
+				return n, nil
+			}
+			if err != nil {
+				return n, err
+			}
+		} else {
+			num, err := b.Write(r.items[r.start:len(r.items)])
+			if n < 0 {
+				panic(errNegativeRead)
+			}
+			n += int64(num)
+			if errors.Is(err, io.EOF) {
+				return n, nil
+			}
+			if err != nil {
+				return n, err
+			}
+			num, err = b.Write(r.items[:r.end])
+			if n < 0 {
+				panic(errNegativeRead)
+			}
+			n += int64(num)
+			if errors.Is(err, io.EOF) {
+				r.Reset()
+				return n, nil
+			}
+			if err != nil {
+				return n, err
+			}
+		}
+	}
+}
+
 // Reset resets the buffer to be empty,
 // but it retains the underlying storage for use by future writes.
 func (r *RingFilter[T]) Reset() {
@@ -72,7 +118,7 @@ func (r *RingFilter[T]) Read(p []T) (n int, err error) {
 // with the full buffer in the ring, and the ring reset.
 // The return value n is the number of T items read. Any error except io.EOF
 // encountered during the read is also returned.
-func (r *RingFilter[T]) ReadFrom(b gio.Reader[T]) (n int, err error) {
+func (r *RingFilter[T]) ReadFrom(b gio.Reader[T]) (n int64, err error) {
 	for {
 		num, err := b.Read(r.items[r.start:len(r.items)])
 		if n < 0 {
@@ -82,7 +128,7 @@ func (r *RingFilter[T]) ReadFrom(b gio.Reader[T]) (n int, err error) {
 			return n, nil
 		}
 		r.end = (r.end + num) % len(r.items)
-		n += num
+		n += int64(num)
 		if r.end%len(r.items) == r.start {
 			err = r.fn(r.items[r.start:len(r.items)])
 			r.Reset()
