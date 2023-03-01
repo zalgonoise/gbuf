@@ -147,6 +147,40 @@ func (r *RingFilter[T]) ReadFrom(b gio.Reader[T]) (n int64, err error) {
 	}
 }
 
+// ReadFromIf extends ReadFrom with a conditional function that is called on each loop.
+// If the condition(s) is / are met, the loop will continue.
+// The return value n is the number of T items read. Any error except io.EOF
+// encountered during the read is also returned.
+func (r *RingFilter[T]) ReadFromIf(b gio.Reader[T], cond func() bool) (n int64, err error) {
+	for cond() {
+		num, err := b.Read(r.items[r.end:len(r.items)])
+		if n < 0 {
+			panic(errNegativeRead)
+		}
+		if errors.Is(err, io.EOF) {
+			r.end = (r.end + num) % len(r.items)
+			err = r.fn(r.items[r.start:len(r.items)])
+			if err != nil {
+				return n, err
+			}
+			return n, nil
+		}
+		r.end = (r.end + num) % len(r.items)
+		n += int64(num)
+		if r.end == r.start {
+			err = r.fn(r.items[r.start:len(r.items)])
+			if err != nil {
+				return n, err
+			}
+			r.Reset()
+		}
+		if err != nil && !errors.Is(err, io.EOF) {
+			return n, err
+		}
+	}
+	return n, err
+}
+
 // Value returns a slice of length b.Len() holding the unread portion of the buffer.
 // The slice is valid for use only until the next buffer modification (that is,
 // only until the next call to a method like Read, Write, Reset, or Truncate).
