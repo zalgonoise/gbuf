@@ -125,6 +125,11 @@ func (r *RingFilter[T]) ReadFrom(b gio.Reader[T]) (n int64, err error) {
 			panic(errNegativeRead)
 		}
 		if errors.Is(err, io.EOF) {
+			r.end = (r.end + num) % len(r.items)
+			err = r.fn(r.items[r.start:len(r.items)])
+			if err != nil {
+				return n, err
+			}
 			return n, nil
 		}
 		r.end = (r.end + num) % len(r.items)
