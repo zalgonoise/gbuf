@@ -120,7 +120,7 @@ func (r *RingFilter[T]) Read(p []T) (n int, err error) {
 // encountered during the read is also returned.
 func (r *RingFilter[T]) ReadFrom(b gio.Reader[T]) (n int64, err error) {
 	for {
-		num, err := b.Read(r.items[r.start:len(r.items)])
+		num, err := b.Read(r.items[r.end:len(r.items)])
 		if n < 0 {
 			panic(errNegativeRead)
 		}
@@ -129,8 +129,11 @@ func (r *RingFilter[T]) ReadFrom(b gio.Reader[T]) (n int64, err error) {
 		}
 		r.end = (r.end + num) % len(r.items)
 		n += int64(num)
-		if r.end%len(r.items) == r.start {
+		if r.end == r.start {
 			err = r.fn(r.items[r.start:len(r.items)])
+			if err != nil {
+				return n, err
+			}
 			r.Reset()
 		}
 		if err != nil && !errors.Is(err, io.EOF) {
