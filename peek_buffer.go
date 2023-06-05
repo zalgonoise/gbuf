@@ -102,7 +102,7 @@ func (b *PeekBuffer[T]) PeekRange(from, to int, p []T) (n int, err error) {
 // buf should have the desired capacity but a length of zero.
 func NewPeekBuffer[T any](buf []T) *PeekBuffer[T] {
 	return &PeekBuffer[T]{
-		Buffer: &Buffer[T]{buf: buf},
+		Buffer: NewBuffer(buf),
 	}
 }
 
