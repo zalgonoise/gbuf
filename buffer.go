@@ -367,6 +367,10 @@ func (b *Buffer[T]) readSlice(delim func(T) bool) (line []T, err error) {
 // the initial size of the internal buffer for writing. To do that,
 // buf should have the desired capacity but a length of zero.
 //
-// In most cases, new(Buffer) (or just declaring a Buffer variable) is
-// sufficient to initialize a Buffer.
-func NewBuffer[T any](buf []T) *Buffer[T] { return &Buffer[T]{buf: buf} }
+// In most cases, new(Buffer[T]) (or just declaring a *Buffer[T] variable) is
+// sufficient to initialize a Buffer of type T.
+func NewBuffer[T any](buf []T) *Buffer[T] {
+	return &Buffer[T]{
+		buf: buf,
+	}
+}
