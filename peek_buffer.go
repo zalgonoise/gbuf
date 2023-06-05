@@ -93,3 +93,22 @@ func (b *PeekBuffer[T]) PeekRange(from, to int, p []T) (n int, err error) {
 
 	return n, nil
 }
+
+// NewPeekBuffer creates and initializes a new Buffer using buf as its
+// initial contents, as a PeekBuffer. The new Buffer takes ownership of buf,
+// and the caller should not use buf after this call. NewPeekBuffer is intended to
+// prepare a Buffer to read existing data. It can also be used to set
+// the initial size of the internal buffer for writing. To do that,
+// buf should have the desired capacity but a length of zero.
+func NewPeekBuffer[T any](buf []T) *PeekBuffer[T] {
+	return &PeekBuffer[T]{
+		Buffer: &Buffer[T]{buf: buf},
+	}
+}
+
+// AsPeekBuffer converts a Buffer[T] into a PeekBuffer[T]
+func AsPeekBuffer[T any](buf *Buffer[T]) *PeekBuffer[T] {
+	return &PeekBuffer[T]{
+		Buffer: buf,
+	}
+}
