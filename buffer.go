@@ -29,12 +29,8 @@ type readOp int8
 // Don't use iota for these, as the values need to correspond with the
 // names and comments, which is easier to see when being explicit.
 const (
-	opRead      readOp = -1 // Any other read operation.
-	opInvalid   readOp = 0  // Non-read operation.
-	opReadRune1 readOp = 1  // Read rune of size 1.
-	opReadRune2 readOp = 2  // Read rune of size 2.
-	opReadRune3 readOp = 3  // Read rune of size 3.
-	opReadRune4 readOp = 4  // Read rune of size 4.
+	opRead    readOp = -1 // Any other read operation.
+	opInvalid readOp = 0  // Non-read operation.
 )
 
 // ErrTooLarge is passed to panic if memory cannot be allocated to store data in a buffer.
@@ -313,10 +309,10 @@ func (b *Buffer[T]) ReadItem() (T, error) {
 
 var ErrUnreadItem = errors.New("gbuf.Buffer: UnreadItem: previous operation was not a successful read")
 
-// UnreadT item unreads the last T item returned by the most recent successful
-// read operation that read at least one T item. If a write has happened since
-// the last read, if the last read returned an error, or if the read read zero
-// T items, UnreadT item returns an error.
+// UnreadItem unreads the last T item returned by the most recent successful
+// read operation that read at least one T item. If a write operation has happened since
+// the last read, if the last read returned an error, or if the read operation reads zero
+// T items, UnreadItem returns an error.
 func (b *Buffer[T]) UnreadItem() error {
 	if b.lastRead == opInvalid {
 		return ErrUnreadItem
