@@ -22,22 +22,56 @@ type RingFilter[T any] struct {
 // If the index in the buffer has not been yet read, the entire unread
 // buffer value is sent to the configured process function
 func (r *RingFilter[T]) Write(p []T) (n int, err error) {
-	for i := range p {
-		r.items[r.end] = p[i]
-		if (r.end+1)%len(r.items) == r.start {
-			if r.end < len(r.items) {
-				r.end++
+	var (
+		ln     = len(p)
+		ringLn = r.Len()
+	)
+
+	if ln < ringLn {
+		n = copy(r.items[r.start:r.start+ln], p)
+
+		err = r.fn(r.items[r.start : r.start+ln])
+		if err != nil {
+			return n, err
+		}
+
+		return n, nil
+	}
+
+	for n < ln {
+		if r.start > 0 {
+			ringLn = r.Len()
+			if n+ringLn > ln {
+				ringLn -= (n + ringLn) % ln
 			}
-			err = r.fn(r.items[r.start:r.end])
-			r.Reset()
-			if err != nil && !errors.Is(err, io.EOF) {
-				return i + 1, err
+
+			n += copy(r.items[r.start:r.Cap()], p[n:n+ringLn])
+
+			err = r.fn(r.items[r.start:r.Cap()])
+			if err != nil {
+				return n, err
 			}
+
+			// buffer is reset, can fill from 0:end again
+			r.start, r.end = 0, 0
+
 			continue
 		}
-		r.end = (r.end + 1) % len(r.items)
+
+		ringLn = r.Cap()
+		if n+ringLn > ln {
+			ringLn -= (n + ringLn) % ln
+		}
+
+		n += copy(r.items[0:ringLn], p[n:n+ringLn])
+
+		err = r.fn(r.items[0:ringLn])
+		if err != nil {
+			return n, err
+		}
 	}
-	return len(p), nil
+
+	return n, nil
 }
 
 // WriteTo writes data to w until the buffer is drained or an error occurs.
@@ -119,19 +153,24 @@ func (r *RingFilter[T]) Read(p []T) (n int, err error) {
 // The return value n is the number of T items read. Any error except io.EOF
 // encountered during the read is also returned.
 func (r *RingFilter[T]) ReadFrom(b gio.Reader[T]) (n int64, err error) {
+	var num int
 	for {
-		num, err := b.Read(r.items[r.end:len(r.items)])
+		num, err = b.Read(r.items[r.end:len(r.items)])
 		if n < 0 {
 			panic(errNegativeRead)
 		}
-		if errors.Is(err, io.EOF) {
+		switch {
+		case errors.Is(err, io.EOF):
 			r.end = (r.end + num) % len(r.items)
 			err = r.fn(r.items[r.start:len(r.items)])
 			if err != nil {
 				return n, err
 			}
 			return n, nil
+		case err != nil:
+			return n, err
 		}
+
 		r.end = (r.end + num) % len(r.items)
 		n += int64(num)
 		if r.end == r.start {
@@ -141,7 +180,7 @@ func (r *RingFilter[T]) ReadFrom(b gio.Reader[T]) (n int64, err error) {
 			}
 			r.Reset()
 		}
-		if err != nil && !errors.Is(err, io.EOF) {
+		if err != nil {
 			return n, err
 		}
 	}
