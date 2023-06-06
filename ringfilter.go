@@ -35,6 +35,8 @@ func (r *RingFilter[T]) Write(p []T) (n int, err error) {
 			return n, err
 		}
 
+		r.start += ln
+
 		return n, nil
 	}
 
