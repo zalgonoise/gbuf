@@ -21,6 +21,16 @@ func TestRingFilter_Write(t *testing.T) {
 			input: "very long string buffered every 5 characters",
 			size:  5,
 		},
+		{
+			name:  "Short",
+			input: "x",
+			size:  10,
+		},
+		{
+			name:  "ByteAtATime",
+			input: "one byte at a time",
+			size:  1,
+		},
 	} {
 		t.Run(testcase.name, func(t *testing.T) {
 			var output = make([]byte, 0, len(testcase.input))
