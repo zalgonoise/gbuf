@@ -6,25 +6,35 @@ import (
 	"fmt"
 	"io"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
-func TestRingFilterWrite(t *testing.T) {
-	t.Run("Simple", func(t *testing.T) {
-		input := []byte("very long string buffered every 5 characters")
-		var output = make([]byte, 0, len(input))
-		r := NewRingFilter(4, func(b []byte) error {
-			output = append(output, b...)
-			return nil
-		})
-		_, err := r.Write(input)
-		if err != nil {
-			t.Error(err)
-		}
-		if string(output) != string(input) {
-			t.Errorf("output mismatch error: wanted %s ; got %s -- %v", string(input), string(output), r.items)
-		}
-	})
+func TestRingFilter_Write(t *testing.T) {
+	for _, testcase := range []struct {
+		name  string
+		input string
+		size  int
+	}{
+		{
+			name:  "Simple",
+			input: "very long string buffered every 5 characters",
+			size:  5,
+		},
+	} {
+		t.Run(testcase.name, func(t *testing.T) {
+			var output = make([]byte, 0, len(testcase.input))
 
+			r := NewRingFilter(testcase.size, func(b []byte) error {
+				output = append(output, b...)
+				return nil
+			})
+
+			_, err := r.Write([]byte(testcase.input))
+			require.NoError(t, err)
+			require.Equal(t, string(output), testcase.input)
+		})
+	}
 }
 
 func TestRingFilterReadFrom(t *testing.T) {
