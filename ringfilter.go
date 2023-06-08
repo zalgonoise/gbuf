@@ -29,13 +29,12 @@ func (r *RingFilter[T]) Write(p []T) (n int, err error) {
 
 	if ln < ringLn {
 		n = copy(r.items[r.write:r.write+ln], p)
-
 		err = r.fn(r.items[r.write : r.write+ln])
+		r.write = (r.write + ln) % len(r.items)
+
 		if err != nil {
 			return n, err
 		}
-
-		r.write += ln
 
 		return n, nil
 	}
@@ -47,15 +46,14 @@ func (r *RingFilter[T]) Write(p []T) (n int, err error) {
 				ringLn -= (n + ringLn) % ln
 			}
 
-			n += copy(r.items[r.write:r.Cap()], p[n:n+ringLn])
+			n += copy(r.items[r.write:len(r.items)], p[n:n+ringLn])
+			err = r.fn(r.items[r.write:len(r.items)])
+			// buffer was filled successfully
+			r.write = 0
 
-			err = r.fn(r.items[r.write:r.Cap()])
 			if err != nil {
 				return n, err
 			}
-
-			// buffer is reset, can fill from 0:read again
-			r.write = 0
 
 			continue
 		}
@@ -66,8 +64,9 @@ func (r *RingFilter[T]) Write(p []T) (n int, err error) {
 		}
 
 		n += copy(r.items[0:ringLn], p[n:n+ringLn])
-
 		err = r.fn(r.items[0:ringLn])
+		r.write = (r.write + ringLn) % len(r.items)
+
 		if err != nil {
 			return n, err
 		}
@@ -134,19 +133,34 @@ func (r *RingFilter[T]) Reset() {
 // buffer has no data to return, err is io.EOF (unless len(p) is zero);
 // otherwise it is nil.
 func (r *RingFilter[T]) Read(p []T) (n int, err error) {
-	if r.write == r.read {
+	var (
+		ln     = len(p)
+		ringLn = r.Len()
+	)
+
+	switch {
+	case r.read == r.write:
 		return 0, io.EOF
-	}
-	if r.write < r.read {
-		n = copy(p, r.items[r.write:r.read])
-	} else {
-		n = copy(p, r.items[r.write-1:])
-		if n < len(p) {
-			n += copy(p[n:], r.items[:r.read])
+	case r.read > r.write:
+		size := len(r.items) - r.read
+		n += copy(p[:size], r.items[r.read:len(r.items)])
+		r.read = 0
+
+		// don't keep writing if there isn't enough space in p
+		if n >= ln {
+			return n, nil
 		}
+
+		n += copy(p[n:n+r.write], r.items[:r.write+1])
+		r.read = r.write
+
+		return n, nil
+	default:
+		n = copy(p[:ringLn], r.items[r.read:r.write+1])
+		r.read = r.write
+
+		return n, nil
 	}
-	r.write = (r.write + n) % len(r.items)
-	return n, nil
 }
 
 // ReadFrom reads data from b until EOF and appends it to the buffer, cycling
@@ -257,7 +271,7 @@ func (r *RingFilter[T]) Len() int {
 	if r.read < r.write {
 		return r.write - r.read
 	}
-	return len(r.items)
+	return len(r.items) - (r.read - r.write)
 }
 
 // Cap returns the length of the buffer's underlying T item slice, that is, the
