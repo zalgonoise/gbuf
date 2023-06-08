@@ -1,6 +1,7 @@
 package gbuf
 
 import (
+	"io"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -38,7 +39,7 @@ func TestRingFilter_Write(t *testing.T) {
 
 			_, err := r.Write([]byte(testcase.input))
 			require.NoError(t, err)
-			require.Equal(t, string(output), testcase.input)
+			require.Equal(t, testcase.input, string(output))
 		})
 	}
 }
@@ -89,7 +90,64 @@ func TestRingFilter_Write_Sequential(t *testing.T) {
 				require.NoError(t, err)
 				n += size
 			}
-			require.Equal(t, string(output), testcase.input)
+			require.Equal(t, testcase.input, string(output))
+		})
+	}
+}
+
+func TestRingFilter_Read(t *testing.T) {
+	for _, testcase := range []struct {
+		name  string
+		input string
+		size  int
+		wants string
+		err   error
+	}{
+		{
+			name:  "Simple",
+			input: "very long string buffered every 5 characters",
+			size:  5,
+			wants: "ters\x00",
+		},
+		{
+			name:  "Short",
+			input: "x",
+			size:  10,
+			wants: "x\x00\x00\x00\x00\x00\x00\x00\x00\x00", // zero bytes as buffer isn't filled
+		},
+		{
+			name:  "ByteAtATime",
+			input: "one byte at a time",
+			size:  1,
+			wants: "\x00",
+			err:   io.EOF, // fills the buffer and there is nothing to read
+		},
+		{
+			name:  "Full",
+			input: "complete string",
+			size:  15,
+			wants: "\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00",
+			err:   io.EOF, // fills the buffer and there is nothing to read
+		},
+		{
+			name:  "FullWithExtraSpace",
+			input: "complete string",
+			size:  20,
+			wants: "complete string\x00\x00\x00\x00\x00",
+		},
+	} {
+		t.Run(testcase.name, func(t *testing.T) {
+			r := NewRingFilter(testcase.size, func(b []byte) error {
+				return nil
+			})
+
+			_, err := r.Write([]byte(testcase.input))
+			require.NoError(t, err)
+
+			buf := make([]byte, testcase.size)
+			_, err = r.Read(buf)
+			require.ErrorIs(t, err, testcase.err)
+			require.Equal(t, testcase.wants, string(buf))
 		})
 	}
 }
