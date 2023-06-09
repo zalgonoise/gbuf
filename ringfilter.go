@@ -1,7 +1,6 @@
 package gbuf
 
 import (
-	"errors"
 	"io"
 
 	"github.com/zalgonoise/gio"
@@ -80,47 +79,44 @@ func (r *RingFilter[T]) Write(p []T) (n int, err error) {
 // WriteTo writes data to w until the buffer is drained or an error occurs.
 // The return value n is the number of T items written; it always fits into an
 // int, but it is int64 to match the gio.WriterTo interface. Any error
-// encountered during the write is also returned.
+// encountered during the write operation is also returned.
 func (r *RingFilter[T]) WriteTo(b gio.Writer[T]) (n int64, err error) {
-	for {
-		if r.write < r.read {
-			num, err := b.Write(r.items[r.write:r.read])
-			if n < 0 {
-				panic(errNegativeRead)
-			}
-			n += int64(num)
-			if errors.Is(err, io.EOF) {
-				return n, nil
-			}
-			if err != nil {
-				return n, err
-			}
-		} else {
-			num, err := b.Write(r.items[r.write:len(r.items)])
-			if n < 0 {
-				panic(errNegativeRead)
-			}
-			n += int64(num)
-			if errors.Is(err, io.EOF) {
-				return n, nil
-			}
-			if err != nil {
-				return n, err
-			}
-			num, err = b.Write(r.items[:r.read])
-			if n < 0 {
-				panic(errNegativeRead)
-			}
-			n += int64(num)
-			if errors.Is(err, io.EOF) {
-				r.Reset()
-				return n, nil
-			}
-			if err != nil {
-				return n, err
-			}
+	var num int
+
+	switch {
+	case r.read >= r.write:
+		num, err = b.Write(r.items[r.read:len(r.items)])
+
+		if n < 0 {
+			panic(errNegativeRead)
+		}
+		n += int64(num)
+
+		r.read = (r.read + num) % len(r.items)
+		if err == io.EOF {
+			return n, nil
+		}
+		if err != nil {
+			return n, err
+		}
+		fallthrough // write from [0:r.write]
+	default:
+		num, err = b.Write(r.items[r.read:r.write])
+
+		if n < 0 {
+			panic(errNegativeRead)
+		}
+		n += int64(num)
+
+		r.read = (r.read + num) % len(r.items)
+		if err == io.EOF {
+			return n, nil
+		}
+		if err != nil {
+			return n, err
 		}
 	}
+	return n, nil
 }
 
 // Reset resets the buffer to be empty,
@@ -174,33 +170,22 @@ func (r *RingFilter[T]) Read(p []T) (n int, err error) {
 // The return value n is the number of T items read. Any error except io.EOF
 // encountered during the read is also returned.
 func (r *RingFilter[T]) ReadFrom(b gio.Reader[T]) (n int64, err error) {
-
 	var num int
+
 	for {
-		num, err = b.Read(r.items[r.read:len(r.items)])
+		num, err = b.Read(r.items[r.write:len(r.items)])
 		if n < 0 {
 			panic(errNegativeRead)
 		}
-		switch {
-		case errors.Is(err, io.EOF):
-			r.read = (r.read + num) % len(r.items)
-			err = r.fn(r.items[r.write:len(r.items)])
-			if err != nil {
-				return n, err
-			}
-			return n, nil
-		case err != nil:
+		n += int64(num)
+
+		if errFilter := r.fn(r.items[r.write : r.write+num]); errFilter != nil {
 			return n, err
 		}
 
-		r.read = (r.read + num) % len(r.items)
-		n += int64(num)
-		if r.read == r.write {
-			err = r.fn(r.items[r.write:len(r.items)])
-			if err != nil {
-				return n, err
-			}
-			r.Reset()
+		r.write = (r.write + num) % len(r.items)
+		if err == io.EOF {
+			return n, nil
 		}
 		if err != nil {
 			return n, err
@@ -213,32 +198,28 @@ func (r *RingFilter[T]) ReadFrom(b gio.Reader[T]) (n int64, err error) {
 // The return value n is the number of T items read. Any error except io.EOF
 // encountered during the read is also returned.
 func (r *RingFilter[T]) ReadFromIf(b gio.Reader[T], cond func() bool) (n int64, err error) {
+	var num int
+
 	for cond() {
-		num, err := b.Read(r.items[r.read:len(r.items)])
+		num, err = b.Read(r.items[r.write:len(r.items)])
 		if n < 0 {
 			panic(errNegativeRead)
 		}
-		if errors.Is(err, io.EOF) {
-			r.read = (r.read + num) % len(r.items)
-			err = r.fn(r.items[r.write:len(r.items)])
-			if err != nil {
-				return n, err
-			}
+		n += int64(num)
+
+		if errFilter := r.fn(r.items[r.write : r.write+num]); errFilter != nil {
+			return n, err
+		}
+
+		r.write = (r.write + num) % len(r.items)
+		if err == io.EOF {
 			return n, nil
 		}
-		r.read = (r.read + num) % len(r.items)
-		n += int64(num)
-		if r.read == r.write {
-			err = r.fn(r.items[r.write:len(r.items)])
-			if err != nil {
-				return n, err
-			}
-			r.Reset()
-		}
-		if err != nil && !errors.Is(err, io.EOF) {
+		if err != nil {
 			return n, err
 		}
 	}
+
 	return n, err
 }
 
@@ -246,28 +227,20 @@ func (r *RingFilter[T]) ReadFromIf(b gio.Reader[T], cond func() bool) (n int64, 
 // The slice is valid for use only until the next buffer modification (that is,
 // only until the next call to a method like Read, Write, Reset, or Truncate).
 func (r *RingFilter[T]) Value() []T {
-	var (
-		n     int
-		items []T
-	)
-	if r.write == r.read {
-		return nil
+	switch {
+	case r.read < r.write:
+		items := make([]T, r.write-r.read)
+		copy(items, r.items[r.read:r.write])
+		r.read = r.write
+
+		return items
+	default:
+		items := make([]T, len(r.items))
+		copy(items[:r.read], r.items[r.read:])
+		copy(items[r.read:], r.items[:r.read])
+
+		return items
 	}
-	if r.write < r.read {
-		if r.read < len(r.items) {
-			r.read++
-		}
-		items = make([]T, r.read-r.write)
-		n = copy(items, r.items[r.write:r.read])
-	} else {
-		items = make([]T, len(r.items))
-		n = copy(items, r.items[r.write-1:])
-		if n < len(items) {
-			n += copy(items[n:], r.items[:r.read])
-		}
-	}
-	r.Reset()
-	return items
 }
 
 // Len returns the number of T items of the unread portion of the buffer;
@@ -290,8 +263,19 @@ func NewRingFilter[T any](size int, fn func([]T) error) *RingFilter[T] {
 	if size <= 0 {
 		size = defaultBufferSize
 	}
+
+	if fn == nil {
+		fn = unimplementedFilter[T]()
+	}
+
 	return &RingFilter[T]{
 		items: make([]T, size),
 		fn:    fn,
+	}
+}
+
+func unimplementedFilter[T any]() func([]T) error {
+	return func([]T) error {
+		return nil
 	}
 }
