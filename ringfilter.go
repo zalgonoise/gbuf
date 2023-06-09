@@ -24,7 +24,7 @@ type RingFilter[T any] struct {
 func (r *RingFilter[T]) Write(p []T) (n int, err error) {
 	var (
 		ln     = len(p)
-		ringLn = r.Len()
+		ringLn = len(r.items)
 	)
 
 	if ln < ringLn {
@@ -50,6 +50,11 @@ func (r *RingFilter[T]) Write(p []T) (n int, err error) {
 		err = r.fn(r.items[:end])
 		r.write = end
 
+		if end > r.read {
+			// overwritten items, set read point to write
+			r.read = r.write
+		}
+
 		if err != nil {
 			return n, err
 		}
@@ -57,38 +62,16 @@ func (r *RingFilter[T]) Write(p []T) (n int, err error) {
 		return n, nil
 	}
 
-	for n < ln {
-		if r.write > 0 {
-			ringLn = r.Len()
-			if n+ringLn > ln {
-				ringLn -= (n + ringLn) % ln
-			}
+	// no need to copy all the items if they don't fit
+	// copy the last portion of the input of the same size as the buffer, and reset the
+	// read index to be on the write index. The filter func will consume the entire input buffer, however
+	n = copy(r.items, p[ln-ringLn:])
+	// full circle, reset read index to write point
+	r.read = r.write
 
-			n += copy(r.items[r.write:len(r.items)], p[n:n+ringLn])
-			err = r.fn(r.items[r.write:len(r.items)])
-			// buffer was filled successfully
-			r.write = 0
-
-			if err != nil {
-				return n, err
-			}
-
-			continue
-		}
-
-		ringLn = r.Cap()
-		if n+ringLn > ln {
-			ringLn -= (n + ringLn) % ln
-		}
-
-		n += copy(r.items[0:ringLn], p[n:n+ringLn])
-		err = r.fn(r.items[0:ringLn])
-		r.write = (r.write + ringLn) % len(r.items)
-		r.read = r.write
-
-		if err != nil {
-			return n, err
-		}
+	err = r.fn(p)
+	if err != nil {
+		return n, err
 	}
 
 	return n, nil
@@ -168,7 +151,7 @@ func (r *RingFilter[T]) Read(p []T) (n int, err error) {
 			return n, nil
 		}
 
-		n += copy(p[n:n+r.write], r.items[:r.write+1])
+		n += copy(p[n:n+r.write], r.items[:r.write])
 		r.read = r.write % len(r.items)
 
 		return n, nil
