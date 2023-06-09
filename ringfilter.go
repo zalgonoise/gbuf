@@ -28,9 +28,27 @@ func (r *RingFilter[T]) Write(p []T) (n int, err error) {
 	)
 
 	if ln < ringLn {
-		n = copy(r.items[r.write:r.write+ln], p)
-		err = r.fn(r.items[r.write : r.write+ln])
-		r.write = (r.write + ln) % len(r.items)
+		end := r.write + ln
+		if end <= len(r.items) {
+			n = copy(r.items[r.write:r.write+ln], p)
+			err = r.fn(r.items[r.write : r.write+ln])
+			r.write = r.write + ln
+
+			if err != nil {
+				return n, err
+			}
+
+			return n, nil
+		}
+
+		end %= len(r.items)
+
+		n = copy(r.items[r.write:len(r.items)], p)
+		err = r.fn(r.items[r.write:len(r.items)])
+
+		n += copy(r.items[:end], p[n:])
+		err = r.fn(r.items[:end])
+		r.write = end
 
 		if err != nil {
 			return n, err
@@ -66,6 +84,7 @@ func (r *RingFilter[T]) Write(p []T) (n int, err error) {
 		n += copy(r.items[0:ringLn], p[n:n+ringLn])
 		err = r.fn(r.items[0:ringLn])
 		r.write = (r.write + ringLn) % len(r.items)
+		r.read = r.write
 
 		if err != nil {
 			return n, err
@@ -139,9 +158,7 @@ func (r *RingFilter[T]) Read(p []T) (n int, err error) {
 	)
 
 	switch {
-	case r.read == r.write:
-		return 0, io.EOF
-	case r.read > r.write:
+	case r.read >= r.write:
 		size := len(r.items) - r.read
 		n += copy(p[:size], r.items[r.read:len(r.items)])
 		r.read = 0
@@ -152,12 +169,17 @@ func (r *RingFilter[T]) Read(p []T) (n int, err error) {
 		}
 
 		n += copy(p[n:n+r.write], r.items[:r.write+1])
-		r.read = r.write
+		r.read = r.write % len(r.items)
 
 		return n, nil
 	default:
-		n = copy(p[:ringLn], r.items[r.read:r.write+1])
-		r.read = r.write
+		m := copy(p[:ringLn], r.items[r.read:r.write])
+		if ln < m {
+			n = ln
+		} else {
+			n = m
+		}
+		r.read += n
 
 		return n, nil
 	}
