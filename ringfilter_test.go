@@ -1,7 +1,6 @@
 package gbuf
 
 import (
-	"io"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -107,7 +106,7 @@ func TestRingFilter_Read(t *testing.T) {
 			name:  "Simple",
 			input: "very long string buffered every 5 characters",
 			size:  5,
-			wants: "ters\x00",
+			wants: "cters",
 		},
 		{
 			name:  "Short",
@@ -119,15 +118,13 @@ func TestRingFilter_Read(t *testing.T) {
 			name:  "ByteAtATime",
 			input: "one byte at a time",
 			size:  1,
-			wants: "\x00",
-			err:   io.EOF, // fills the buffer and there is nothing to read
+			wants: "e",
 		},
 		{
 			name:  "Full",
 			input: "complete string",
 			size:  15,
-			wants: "\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00",
-			err:   io.EOF, // fills the buffer and there is nothing to read
+			wants: "complete string",
 		},
 		{
 			name:  "FullWithExtraSpace",
@@ -148,6 +145,73 @@ func TestRingFilter_Read(t *testing.T) {
 			_, err = r.Read(buf)
 			require.ErrorIs(t, err, testcase.err)
 			require.Equal(t, testcase.wants, string(buf))
+		})
+	}
+}
+
+func TestRingFilter_WriteRead_Interleaved(t *testing.T) {
+	type writeRead struct {
+		write, read int
+	}
+
+	for _, testcase := range []struct {
+		name        string
+		input       string
+		wantsFilter string
+		wantsRead   string
+		size        int
+		chunkSizes  []writeRead // [write, read] pairs of operations
+	}{
+		{
+			name:  "WriteWithSomeReads",
+			input: "very long string buffered every 5 characters",
+			size:  10,
+			chunkSizes: []writeRead{
+				{5, 0}, {3, 0}, {0, 4}, {7, 0},
+			},
+			wantsFilter: "very long strin",
+			wantsRead:   "very",
+		},
+		{
+			name:  "WritesSweepThroughReads",
+			input: "very long string buffered every 5 characters",
+			size:  10,
+			chunkSizes: []writeRead{
+				{8, 3}, {8, 4}, {8, 0},
+			},
+			wantsFilter: "very long string buffere",
+			wantsRead:   "verong ",
+		},
+	} {
+		t.Run(testcase.name, func(t *testing.T) {
+			var outputFilter = make([]byte, 0, len(testcase.input))
+			var outputRead = make([]byte, len(testcase.input))
+			var writeN int
+			var readN int
+
+			r := NewRingFilter(testcase.size, func(b []byte) error {
+				outputFilter = append(outputFilter, b...)
+				return nil
+			})
+
+			for _, wr := range testcase.chunkSizes {
+				if wr.write > 0 {
+					_, err := r.Write([]byte(testcase.input)[writeN : writeN+wr.write])
+					require.NoError(t, err)
+					writeN += wr.write
+				}
+
+				if wr.read > 0 {
+					_, err := r.Read(outputRead[readN : readN+wr.read])
+					require.NoError(t, err)
+					readN += wr.read
+				}
+			}
+
+			outputRead = outputRead[:readN:readN]
+
+			require.Equal(t, testcase.wantsFilter, string(outputFilter))
+			require.Equal(t, testcase.wantsRead, string(outputRead))
 		})
 	}
 }
