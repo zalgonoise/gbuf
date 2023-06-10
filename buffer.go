@@ -80,6 +80,7 @@ func (b *Buffer[T]) tryGrowByReslice(n int) (int, bool) {
 		b.buf = b.buf[:l+n]
 		return l, true
 	}
+
 	return 0, false
 }
 
@@ -103,21 +104,25 @@ func (b *Buffer[T]) grow(n int) int {
 	}
 
 	c := cap(b.buf)
-	if n <= c/2-m {
+
+	switch {
+	case n <= c/2-m:
 		// We can slide things down instead of allocating a new
 		// slice. We only need m+n <= c to slide, but
 		// we instead let capacity get twice as large so we
 		// don't spend all our time copying.
 		copy(b.buf, b.buf[b.off:])
-	} else if c > maxInt-c-n {
+	case c > maxInt-c-n:
 		panic(ErrTooLarge)
-	} else {
+	default:
 		// Add b.off to account for b.buf[:b.off] being sliced off the front.
 		b.buf = growSlice(b.buf[b.off:], b.off+n)
 	}
+
 	// Restore b.off and len(b.buf).
 	b.off = 0
 	b.buf = b.buf[:m+n]
+
 	return m
 }
 
@@ -130,6 +135,7 @@ func (b *Buffer[T]) Grow(n int) {
 	if n < 0 {
 		panic("gbuf.Buffer.Grow: negative count")
 	}
+
 	m := b.grow(n)
 	b.buf = b.buf[:m]
 }
@@ -140,9 +146,11 @@ func (b *Buffer[T]) Grow(n int) {
 func (b *Buffer[T]) Write(p []T) (n int, err error) {
 	b.isReading.Store(false)
 	m, ok := b.tryGrowByReslice(len(p))
+
 	if !ok {
 		m = b.grow(len(p))
 	}
+
 	return copy(b.buf[m:], p), nil
 }
 
@@ -158,19 +166,23 @@ const MinRead = 512
 // buffer becomes too large, ReadFrom will panic with ErrTooLarge.
 func (b *Buffer[T]) ReadFrom(r gio.Reader[T]) (n int64, err error) {
 	b.isReading.Store(false)
+
 	for {
 		i := b.grow(MinRead)
 		b.buf = b.buf[:i]
 		m, e := r.Read(b.buf[i:cap(b.buf)])
+
 		if m < 0 {
 			panic(errNegativeRead)
 		}
 
 		b.buf = b.buf[:i+m]
 		n += int64(m)
-		if e == io.EOF {
+
+		if errors.Is(e, io.EOF) {
 			return n, nil // e is EOF, so return nil explicitly
 		}
+
 		if e != nil {
 			return n, e
 		}
@@ -194,13 +206,15 @@ func growSlice[T any](b []T, n int) []T {
 	// Instead use the append-make pattern with a nil slice to ensure that
 	// we allocate buffers rounded up to the closest size class.
 	c := len(b) + n // ensure enough space for n elements
-	if c < 2*cap(b) {
+	if c < double*cap(b) {
 		// The growth rate has historically always been 2x. In the future,
 		// we could rely purely on append to determine the growth rate.
-		c = 2 * cap(b)
+		c = double * cap(b)
 	}
+
 	b2 := append([]T(nil), make([]T, c)...)
 	copy(b2, b)
+
 	return b2[:len(b)]
 }
 
@@ -210,13 +224,16 @@ func growSlice[T any](b []T, n int) []T {
 // encountered during the write operation is also returned.
 func (b *Buffer[T]) WriteTo(w gio.Writer[T]) (n int64, err error) {
 	b.isReading.Store(false)
+
 	if nItems := b.Len(); nItems > 0 {
 		m, e := w.Write(b.buf[b.off:])
 		if m > nItems {
 			panic("gbuf.Buffer.WriteTo: invalid Write count")
 		}
+
 		b.off += m
 		n = int64(m)
+
 		if e != nil {
 			return n, e
 		}
@@ -226,8 +243,10 @@ func (b *Buffer[T]) WriteTo(w gio.Writer[T]) (n int64, err error) {
 			return n, io.ErrShortWrite
 		}
 	}
+
 	// Buffer is now empty; reset.
 	b.Reset()
+
 	return n, nil
 }
 
@@ -238,10 +257,13 @@ func (b *Buffer[T]) WriteTo(w gio.Writer[T]) (n int64, err error) {
 func (b *Buffer[T]) WriteItem(item T) error {
 	b.isReading.Store(false)
 	m, ok := b.tryGrowByReslice(1)
+
 	if !ok {
 		m = b.grow(1)
 	}
+
 	b.buf[m] = item
+
 	return nil
 }
 
@@ -251,19 +273,25 @@ func (b *Buffer[T]) WriteItem(item T) error {
 // otherwise it is nil.
 func (b *Buffer[T]) Read(p []T) (n int, err error) {
 	b.isReading.Store(false)
+
 	if b.empty() {
 		// Buffer is empty, reset to recover space.
 		b.Reset()
+
 		if len(p) == 0 {
 			return 0, nil
 		}
+
 		return 0, io.EOF
 	}
+
 	n = copy(p, b.buf[b.off:])
 	b.off += n
+
 	if n > 0 {
 		b.isReading.Store(true)
 	}
+
 	return n, nil
 }
 
@@ -274,14 +302,18 @@ func (b *Buffer[T]) Read(p []T) (n int, err error) {
 func (b *Buffer[T]) Next(n int) []T {
 	b.isReading.Store(false)
 	m := b.Len()
+
 	if n > m {
 		n = m
 	}
+
 	data := b.buf[b.off : b.off+n]
 	b.off += n
+
 	if n > 0 {
 		b.isReading.Store(true)
 	}
+
 	return data
 }
 
@@ -291,12 +323,16 @@ func (b *Buffer[T]) ReadItem() (T, error) {
 	if b.empty() {
 		// Buffer is empty, reset to recover space.
 		b.Reset()
+
 		var zero T
+
 		return zero, io.EOF
 	}
+
 	c := b.buf[b.off]
 	b.off++
 	b.isReading.Store(true)
+
 	return c, nil
 }
 
@@ -310,10 +346,13 @@ func (b *Buffer[T]) UnreadItem() error {
 	if !b.isReading.Load() {
 		return ErrUnreadItem
 	}
+
 	b.isReading.Store(false)
+
 	if b.off > 0 {
 		b.off--
 	}
+
 	return nil
 }
 
@@ -328,6 +367,7 @@ func (b *Buffer[T]) ReadItems(delim func(T) bool) (line []T, err error) {
 	// return a copy of slice. The buffer's backing array may
 	// be overwritten by later calls.
 	line = append(line, slice...)
+
 	return line, err
 }
 
