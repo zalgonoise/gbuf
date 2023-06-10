@@ -14,12 +14,16 @@ func Peek[T any](p []T, b *Buffer[T]) (n int, err error) {
 	if b.empty() {
 		// Buffer is empty, reset to recover space.
 		b.Reset()
+
 		if len(p) == 0 {
 			return 0, nil
 		}
+
 		return 0, io.EOF
 	}
+
 	n = copy(p, b.buf[b.off:])
+
 	return n, nil
 }
 
@@ -36,12 +40,16 @@ func PeekFrom[T any](idx int, p []T, b *Buffer[T]) (n int, err error) {
 	if b.empty() {
 		// Buffer is empty, reset to recover space.
 		b.Reset()
+
 		if len(p) == 0 {
 			return 0, nil
 		}
+
 		return 0, io.EOF
 	}
+
 	n = copy(p, b.buf[idx:])
+
 	return n, nil
 }
 
@@ -76,9 +84,11 @@ func PeekRange[T any](from, to int, p []T, b *Buffer[T]) (n int, err error) {
 	if b.empty() {
 		// Buffer is empty, reset to recover space.
 		b.Reset()
+
 		if ln == 0 {
 			return 0, nil
 		}
+
 		return 0, io.EOF
 	}
 
