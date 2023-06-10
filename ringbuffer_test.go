@@ -52,7 +52,6 @@ func BenchmarkRingBufferReadWrite(b *testing.B) {
 		}
 		_ = item
 	})
-
 }
 
 func TestRingBufferWrite(t *testing.T) {
