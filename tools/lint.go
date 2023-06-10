@@ -1,5 +1,3 @@
-// to run any of the tools in this package, simply call `go generate ./...` from
-// the project's top-level directory.
 package main
 
 // run golangci-lint on this project
