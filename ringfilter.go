@@ -267,21 +267,23 @@ func (r *RingFilter[T]) ReadFromIf(b gio.Reader[T], cond func() bool) (n int64, 
 // Value returns a slice of length b.Len() holding the unread portion of the buffer.
 // The slice is valid for use only until the next buffer modification (that is,
 // only until the next call to a method like Read, Write, Reset, or Truncate).
-func (r *RingFilter[T]) Value() []T {
+func (r *RingFilter[T]) Value() (items []T) {
 	switch {
 	case r.read < r.write:
-		items := make([]T, r.write-r.read)
+		items = make([]T, r.write-r.read)
 		copy(items, r.items[r.read:r.write])
 		r.read = r.write
 
-		return items
+	case r.read == 0:
+		items = make([]T, len(r.items))
+		copy(items, r.items)
 	default:
-		items := make([]T, len(r.items))
+		items = make([]T, len(r.items))
 		copy(items[:r.read], r.items[r.read:])
 		copy(items[r.read:], r.items[:r.read])
-
-		return items
 	}
+
+	return items
 }
 
 // Len returns the number of T items of the unread portion of the buffer;
