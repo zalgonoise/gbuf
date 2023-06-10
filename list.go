@@ -21,6 +21,7 @@ func (e *Element[T]) Next() *Element[T] {
 	if p := e.next; e.list != nil && p != &e.list.root {
 		return p
 	}
+
 	return nil
 }
 
@@ -29,6 +30,7 @@ func (e *Element[T]) Prev() *Element[T] {
 	if p := e.prev; e.list != nil && p != &e.list.root {
 		return p
 	}
+
 	return nil
 }
 
@@ -44,6 +46,7 @@ func (l *List[T]) Init() *List[T] {
 	l.root.next = &l.root
 	l.root.prev = &l.root
 	l.len = 0
+
 	return l
 }
 
@@ -59,6 +62,7 @@ func (l *List[T]) Front() *Element[T] {
 	if l.len == 0 {
 		return nil
 	}
+
 	return l.root.next
 }
 
@@ -67,6 +71,7 @@ func (l *List[T]) Back() *Element[T] {
 	if l.len == 0 {
 		return nil
 	}
+
 	return l.root.prev
 }
 
@@ -85,6 +90,7 @@ func (l *List[T]) insert(e, at *Element[T]) *Element[T] {
 	e.next.prev = e
 	e.list = l
 	l.len++
+
 	return e
 }
 
@@ -108,6 +114,7 @@ func (l *List[T]) move(e, at *Element[T]) {
 	if e == at {
 		return
 	}
+
 	e.prev.next = e.next
 	e.next.prev = e.prev
 
@@ -126,6 +133,7 @@ func (l *List[T]) Remove(e *Element[T]) any {
 		// in l or l == nil (e is a zero Element) and l.remove will crash
 		l.remove(e)
 	}
+
 	return e.Value
 }
 
@@ -192,6 +200,7 @@ func (l *List[T]) MoveBefore(e, mark *Element[T]) {
 	if e.list != l || e == mark || mark.list != l {
 		return
 	}
+
 	l.move(e, mark.prev)
 }
 
@@ -202,6 +211,7 @@ func (l *List[T]) MoveAfter(e, mark *Element[T]) {
 	if e.list != l || e == mark || mark.list != l {
 		return
 	}
+
 	l.move(e, mark)
 }
 
@@ -209,6 +219,7 @@ func (l *List[T]) MoveAfter(e, mark *Element[T]) {
 // The lists l and other may be the same. They must not be nil.
 func (l *List[T]) PushBackList(other *List[T]) {
 	l.lazyInit()
+
 	for i, e := other.Len(), other.Front(); i > 0; i, e = i-1, e.Next() {
 		l.insertValue(e.Value, l.root.prev)
 	}
@@ -218,6 +229,7 @@ func (l *List[T]) PushBackList(other *List[T]) {
 // The lists l and other may be the same. They must not be nil.
 func (l *List[T]) PushFrontList(other *List[T]) {
 	l.lazyInit()
+
 	for i, e := other.Len(), other.Back(); i > 0; i, e = i-1, e.Prev() {
 		l.insertValue(e.Value, &l.root)
 	}
