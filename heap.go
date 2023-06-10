@@ -2,7 +2,12 @@ package gbuf
 
 import "sort"
 
-// The Interface type describes the requirements
+const (
+	half   = 2
+	double = 2
+)
+
+// Heap describes the requirements
 // for a type using the routines in this package.
 // Any type that implements it may be used as a
 // min-heap with the following invariants (established after
@@ -26,7 +31,7 @@ type Heap[T any] interface {
 func Init[T any](h Heap[T]) {
 	// heapify
 	n := h.Len()
-	for i := n/2 - 1; i >= 0; i-- {
+	for i := n/half - 1; i >= 0; i-- {
 		down(h, i, n)
 	}
 }
@@ -45,6 +50,7 @@ func Pop[T any](h Heap[T]) any {
 	n := h.Len() - 1
 	h.Swap(0, n)
 	down(h, 0, n)
+
 	return h.Pop()
 }
 
@@ -54,10 +60,12 @@ func Remove[T any](h Heap[T], i int) any {
 	n := h.Len() - 1
 	if n != i {
 		h.Swap(i, n)
+
 		if !down(h, i, n) {
 			up(h, i)
 		}
 	}
+
 	return h.Pop()
 }
 
@@ -73,10 +81,11 @@ func Fix[T any](h Heap[T], i int) {
 
 func up[T any](h Heap[T], j int) {
 	for {
-		i := (j - 1) / 2 // parent
+		i := (j - 1) / half // parent
 		if i == j || !h.Less(j, i) {
 			break
 		}
+
 		h.Swap(i, j)
 		j = i
 	}
@@ -84,20 +93,27 @@ func up[T any](h Heap[T], j int) {
 
 func down[T any](h Heap[T], i0, n int) bool {
 	i := i0
+
 	for {
-		j1 := 2*i + 1
+		j1 := double*i + 1
+
 		if j1 >= n || j1 < 0 { // j1 < 0 after int overflow
 			break
 		}
+
 		j := j1 // left child
+
 		if j2 := j1 + 1; j2 < n && h.Less(j2, j1) {
 			j = j2 // = 2*i + 2  // right child
 		}
+
 		if !h.Less(j, i) {
 			break
 		}
+
 		h.Swap(i, j)
 		i = j
 	}
+
 	return i > i0
 }
