@@ -7,6 +7,13 @@ import (
 	"github.com/zalgonoise/gio"
 )
 
+var (
+	ErrReaderNegativePosition = errors.New("gbuf.Reader.Seek: negative position")
+	ErrReaderInvalidWhence    = errors.New("gbuf.Reader.Seek: invalid whence")
+	ErrReaderAtTheBeginning   = errors.New("gbuf.Reader.UnreadItem: at beginning of slice")
+	ErrReaderNegativeOffset   = errors.New("gbuf.Reader.ReadAt: negative offset")
+)
+
 // A Reader implements the gio.Reader, gio.ReaderAt, gio.WriterTo, gio.Seeker,
 // and gio.Scanner interfaces by reading from
 // a T item slice.
@@ -24,6 +31,7 @@ func (r *Reader[T]) Len() int {
 	if r.i >= int64(len(r.s)) {
 		return 0
 	}
+
 	return int(int64(len(r.s)) - r.i)
 }
 
@@ -37,9 +45,11 @@ func (r *Reader[T]) Read(b []T) (n int, err error) {
 	if r.i >= int64(len(r.s)) {
 		return 0, io.EOF
 	}
+
 	r.prevRune = -1
 	n = copy(b, r.s[r.i:])
 	r.i += int64(n)
+
 	return
 }
 
@@ -47,44 +57,53 @@ func (r *Reader[T]) Read(b []T) (n int, err error) {
 func (r *Reader[T]) ReadAt(b []T, off int64) (n int, err error) {
 	// cannot modify state - see io.ReaderAt
 	if off < 0 {
-		return 0, errors.New("gbuf.Reader.ReadAt: negative offset")
+		return 0, ErrReaderNegativeOffset
 	}
+
 	if off >= int64(len(r.s)) {
 		return 0, io.EOF
 	}
+
 	n = copy(b, r.s[off:])
+
 	if n < len(b) {
 		err = io.EOF
 	}
-	return
+
+	return n, err
 }
 
 // ReadItem implements the gio.ItemReader interface.
 func (r *Reader[T]) ReadItem() (T, error) {
 	r.prevRune = -1
+
 	if r.i >= int64(len(r.s)) {
 		var zero T
 		return zero, io.EOF
 	}
+
 	b := r.s[r.i]
 	r.i++
+
 	return b, nil
 }
 
 // UnreadItem complements ReadItem in implementing the gio.ItemScanner interface.
 func (r *Reader[T]) UnreadItem() error {
 	if r.i <= 0 {
-		return errors.New("gbuf.Reader.UnreadT item: at beginning of slice")
+		return ErrReaderAtTheBeginning
 	}
+
 	r.prevRune = -1
 	r.i--
+
 	return nil
 }
 
 // Seek implements the gio.Seeker interface.
-func (r *Reader[T]) Seek(offset int64, whence int) (int64, error) {
+func (r *Reader[T]) Seek(offset int64, whence int) (abs int64, err error) {
 	r.prevRune = -1
-	var abs int64
+
 	switch whence {
 	case gio.SeekStart:
 		abs = offset
@@ -93,31 +112,40 @@ func (r *Reader[T]) Seek(offset int64, whence int) (int64, error) {
 	case gio.SeekEnd:
 		abs = int64(len(r.s)) + offset
 	default:
-		return 0, errors.New("gbuf.Reader.Seek: invalid whence")
+		return 0, ErrReaderInvalidWhence
 	}
+
 	if abs < 0 {
-		return 0, errors.New("gbuf.Reader.Seek: negative position")
+		return 0, ErrReaderNegativePosition
 	}
+
 	r.i = abs
+
 	return abs, nil
 }
 
 // WriteTo implements the gio.WriterTo interface.
 func (r *Reader[T]) WriteTo(w gio.Writer[T]) (n int64, err error) {
 	r.prevRune = -1
+
 	if r.i >= int64(len(r.s)) {
 		return 0, nil
 	}
+
 	b := r.s[r.i:]
 	m, err := w.Write(b)
+
 	if m > len(b) {
 		panic("gbuf.Reader.WriteTo: invalid Write count")
 	}
+
 	r.i += int64(m)
 	n = int64(m)
+
 	if m != len(b) && err == nil {
 		err = io.ErrShortWrite
 	}
+
 	return
 }
 
