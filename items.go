@@ -20,9 +20,11 @@ func Repeat[T any](b []T, count int) []T {
 
 	nb := make([]T, len(b)*count)
 	bp := copy(nb, b)
+
 	for bp < len(nb) {
 		copy(nb[bp:], nb[:bp])
 		bp *= 2
 	}
+
 	return nb
 }
