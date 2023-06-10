@@ -1,6 +1,7 @@
 package gbuf
 
 import (
+	"errors"
 	"io"
 
 	"github.com/zalgonoise/gio"
@@ -16,6 +17,58 @@ type RingFilter[T any] struct {
 	items []T
 }
 
+func (r *RingFilter[T]) writeWithinBounds(p []T, end int) (n int, err error) {
+	n = copy(r.items[r.write:end], p)
+
+	err = r.fn(r.items[r.write:end])
+
+	r.write = end
+
+	if err != nil {
+		return n, err
+	}
+
+	return n, nil
+}
+
+func (r *RingFilter[T]) writeWrapped(p []T, end int) (n int, err error) {
+	end %= len(r.items)
+
+	n = copy(r.items[r.write:len(r.items)], p)
+
+	err = r.fn(r.items[r.write:len(r.items)])
+
+	n += copy(r.items[:end], p[n:])
+
+	if err != nil {
+		return n, err
+	}
+
+	err = r.fn(r.items[:end])
+
+	r.write = end
+	if end > r.read {
+		// overwritten items, set read point to write
+		r.read = r.write
+	}
+
+	if err != nil {
+		return n, err
+	}
+
+	return n, nil
+}
+
+func (r *RingFilter[T]) writeWithinCapacity(p []T) (n int, err error) {
+	var end = r.write + len(p)
+
+	if end <= len(r.items) {
+		return r.writeWithinBounds(p, end)
+	}
+
+	return r.writeWrapped(p, end)
+}
+
 // Write sets the contents of `p` to the buffer, in sequential order.
 // The return value n is the length of p; err comes from the process func.
 // If the index in the buffer has not been yet read, the entire unread
@@ -27,44 +80,13 @@ func (r *RingFilter[T]) Write(p []T) (n int, err error) {
 	)
 
 	if ln < ringLn {
-		end := r.write + ln
-		if end <= len(r.items) {
-			n = copy(r.items[r.write:r.write+ln], p)
-			err = r.fn(r.items[r.write : r.write+ln])
-			r.write = r.write + ln
-
-			if err != nil {
-				return n, err
-			}
-
-			return n, nil
-		}
-
-		end %= len(r.items)
-
-		n = copy(r.items[r.write:len(r.items)], p)
-		err = r.fn(r.items[r.write:len(r.items)])
-
-		n += copy(r.items[:end], p[n:])
-		err = r.fn(r.items[:end])
-		r.write = end
-
-		if end > r.read {
-			// overwritten items, set read point to write
-			r.read = r.write
-		}
-
-		if err != nil {
-			return n, err
-		}
-
-		return n, nil
+		return r.writeWithinCapacity(p)
 	}
 
 	// no need to copy all the items if they don't fit
 	// copy the last portion of the input of the same size as the buffer, and reset the
 	// read index to be on the write index. The filter func will consume the entire input buffer, however
-	n = copy(r.items, p[ln-ringLn:])
+	copy(r.items, p[ln-ringLn:])
 	// full circle, reset read index to write point
 	r.read = r.write
 
@@ -73,7 +95,7 @@ func (r *RingFilter[T]) Write(p []T) (n int, err error) {
 		return n, err
 	}
 
-	return n, nil
+	return ringLn, nil
 }
 
 // WriteTo writes data to w until the buffer is drained or an error occurs.
@@ -90,15 +112,19 @@ func (r *RingFilter[T]) WriteTo(b gio.Writer[T]) (n int64, err error) {
 		if n < 0 {
 			panic(errNegativeRead)
 		}
+
 		n += int64(num)
 
 		r.read = (r.read + num) % len(r.items)
-		if err == io.EOF {
+
+		if errors.Is(err, io.EOF) {
 			return n, nil
 		}
+
 		if err != nil {
 			return n, err
 		}
+
 		fallthrough // write from [0:r.write]
 	default:
 		num, err = b.Write(r.items[r.read:r.write])
@@ -106,16 +132,20 @@ func (r *RingFilter[T]) WriteTo(b gio.Writer[T]) (n int64, err error) {
 		if n < 0 {
 			panic(errNegativeRead)
 		}
+
 		n += int64(num)
 
 		r.read = (r.read + num) % len(r.items)
-		if err == io.EOF {
+
+		if errors.Is(err, io.EOF) {
 			return n, nil
 		}
+
 		if err != nil {
 			return n, err
 		}
 	}
+
 	return n, nil
 }
 
@@ -139,6 +169,7 @@ func (r *RingFilter[T]) Read(p []T) (n int, err error) {
 	switch {
 	case r.read >= r.write:
 		size := len(r.items) - r.read
+
 		n += copy(p[:size], r.items[r.read:len(r.items)])
 		r.read = 0
 
@@ -153,11 +184,13 @@ func (r *RingFilter[T]) Read(p []T) (n int, err error) {
 		return n, nil
 	default:
 		m := copy(p[:ringLn], r.items[r.read:r.write])
+
 		if ln < m {
 			n = ln
 		} else {
 			n = m
 		}
+
 		r.read += n
 
 		return n, nil
@@ -174,9 +207,11 @@ func (r *RingFilter[T]) ReadFrom(b gio.Reader[T]) (n int64, err error) {
 
 	for {
 		num, err = b.Read(r.items[r.write:len(r.items)])
+
 		if n < 0 {
 			panic(errNegativeRead)
 		}
+
 		n += int64(num)
 
 		if errFilter := r.fn(r.items[r.write : r.write+num]); errFilter != nil {
@@ -184,9 +219,11 @@ func (r *RingFilter[T]) ReadFrom(b gio.Reader[T]) (n int64, err error) {
 		}
 
 		r.write = (r.write + num) % len(r.items)
-		if err == io.EOF {
+
+		if errors.Is(err, io.EOF) {
 			return n, nil
 		}
+
 		if err != nil {
 			return n, err
 		}
@@ -202,9 +239,11 @@ func (r *RingFilter[T]) ReadFromIf(b gio.Reader[T], cond func() bool) (n int64, 
 
 	for cond() {
 		num, err = b.Read(r.items[r.write:len(r.items)])
+
 		if n < 0 {
 			panic(errNegativeRead)
 		}
+
 		n += int64(num)
 
 		if errFilter := r.fn(r.items[r.write : r.write+num]); errFilter != nil {
@@ -212,9 +251,11 @@ func (r *RingFilter[T]) ReadFromIf(b gio.Reader[T], cond func() bool) (n int64, 
 		}
 
 		r.write = (r.write + num) % len(r.items)
-		if err == io.EOF {
+
+		if errors.Is(err, io.EOF) {
 			return n, nil
 		}
+
 		if err != nil {
 			return n, err
 		}
@@ -249,6 +290,7 @@ func (r *RingFilter[T]) Len() int {
 	if r.read < r.write {
 		return r.write - r.read
 	}
+
 	return len(r.items) - (r.read - r.write)
 }
 
@@ -265,7 +307,7 @@ func NewRingFilter[T any](size int, fn func([]T) error) *RingFilter[T] {
 	}
 
 	if fn == nil {
-		fn = unimplementedFilter[T]()
+		fn = unimplementedFilter[T]
 	}
 
 	return &RingFilter[T]{
@@ -274,8 +316,6 @@ func NewRingFilter[T any](size int, fn func([]T) error) *RingFilter[T] {
 	}
 }
 
-func unimplementedFilter[T any]() func([]T) error {
-	return func([]T) error {
-		return nil
-	}
+func unimplementedFilter[T any]([]T) error {
+	return nil
 }
