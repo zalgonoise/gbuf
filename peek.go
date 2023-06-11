@@ -34,7 +34,7 @@ func PeekFrom[T any](idx int, p []T, b *Buffer[T]) (n int, err error) {
 	}
 
 	if idx < 0 || idx >= len(b.buf) {
-		return 0, ErrIndexOutOfBounds
+		return 0, ErrPeekBufferIndexOutOfBounds
 	}
 
 	if b.empty() {
