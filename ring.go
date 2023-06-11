@@ -56,7 +56,7 @@ func (r *Ring[T]) Move(n int) *Ring[T] {
 	return r
 }
 
-// New creates a ring of n elements.
+// NewRing creates a ring of n elements.
 func NewRing[T any](n int) *Ring[T] {
 	if n <= 0 {
 		return nil
