@@ -13,9 +13,9 @@ func Repeat[T any](b []T, count int) []T {
 	// an overflow.
 	// See Issue golang.org/issue/16237.
 	if count < 0 {
-		panic("gbuf: negative Repeat count")
+		panic(ErrNegativeRepeatCount)
 	} else if len(b)*count/count != len(b) {
-		panic("gbuf: Repeat count causes overflow")
+		panic(ErrCountOverflows)
 	}
 
 	nb := make([]T, len(b)*count)
