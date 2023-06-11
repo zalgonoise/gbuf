@@ -1,14 +1,9 @@
 package gbuf
 
 import (
-	"errors"
 	"fmt"
 	"io"
 )
-
-// ErrIndexOutOfBounds is caused when a PeekBuffer method call is made involving an index
-// that is out of bounds of the underlying slice
-var ErrIndexOutOfBounds = errors.New("gbuf.PeekBuffer: index out of bounds")
 
 // A PeekBuffer is a variable-sized buffer of T items with Read and Write methods.
 // The zero value for PeekBuffer is an empty buffer ready to use.
@@ -39,7 +34,7 @@ func (b *PeekBuffer[T]) Peek(p []T) (n int, err error) {
 // PeekFrom is just like Peek, but it reads from the buffer starting at offset `idx`
 func (b *PeekBuffer[T]) PeekFrom(idx int, p []T) (n int, err error) {
 	if idx < 0 || idx >= len(b.buf) {
-		return 0, ErrIndexOutOfBounds
+		return 0, ErrPeekBufferIndexOutOfBounds
 	}
 
 	if b.empty() {
@@ -70,11 +65,11 @@ func (b *PeekBuffer[T]) PeekRange(from, to int, p []T) (n int, err error) {
 	}
 
 	if from < 0 || from >= len(b.buf) {
-		return 0, fmt.Errorf("%w: from value: %d", ErrIndexOutOfBounds, from)
+		return 0, fmt.Errorf("%w: from value: %d", ErrPeekBufferIndexOutOfBounds, from)
 	}
 
 	if to < 0 || to >= len(b.buf) {
-		return 0, fmt.Errorf("%w: to value: %d", ErrIndexOutOfBounds, to)
+		return 0, fmt.Errorf("%w: to value: %d", ErrPeekBufferIndexOutOfBounds, to)
 	}
 
 	if from > to {
