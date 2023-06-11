@@ -98,6 +98,22 @@ func (r *RingFilter[T]) Write(p []T) (n int, err error) {
 	return ringLn, nil
 }
 
+// WriteItem writes the T `item` to the buffer in the next position
+// The returned error is always nil, but is included to match gio.Writer's
+// WriteItem. If the index in the buffer has not been yet read, it will be
+// overwritten
+func (r *RingFilter[T]) WriteItem(item T) (err error) {
+	pos := (r.write + 1) % len(r.items)
+	if r.write == r.read {
+		r.read = pos
+	}
+
+	r.items[r.write] = item
+	r.write = pos
+
+	return r.fn([]T{item})
+}
+
 // WriteTo writes data to w until the buffer is drained or an error occurs.
 // The return value n is the number of T items written; it always fits into an
 // int, but it is int64 to match the gio.WriterTo interface. Any error
@@ -110,7 +126,7 @@ func (r *RingFilter[T]) WriteTo(b gio.Writer[T]) (n int64, err error) {
 		num, err = b.Write(r.items[r.read:len(r.items)])
 
 		if n < 0 {
-			panic(errNegativeRead)
+			return n, ErrRingFilterNegativeRead
 		}
 
 		n += int64(num)
@@ -130,7 +146,7 @@ func (r *RingFilter[T]) WriteTo(b gio.Writer[T]) (n int64, err error) {
 		num, err = b.Write(r.items[r.read:r.write])
 
 		if n < 0 {
-			panic(errNegativeRead)
+			return n, ErrRingFilterNegativeRead
 		}
 
 		n += int64(num)
@@ -147,13 +163,6 @@ func (r *RingFilter[T]) WriteTo(b gio.Writer[T]) (n int64, err error) {
 	}
 
 	return n, nil
-}
-
-// Reset resets the buffer to be empty,
-// but it retains the underlying storage for use by future writes.
-func (r *RingFilter[T]) Reset() {
-	r.write = 0
-	r.read = 0
 }
 
 // Read reads the next len(p) T items from the buffer or until the buffer
@@ -209,7 +218,7 @@ func (r *RingFilter[T]) ReadFrom(b gio.Reader[T]) (n int64, err error) {
 		num, err = b.Read(r.items[r.write:len(r.items)])
 
 		if n < 0 {
-			panic(errNegativeRead)
+			return n, ErrRingFilterNegativeRead
 		}
 
 		n += int64(num)
@@ -241,7 +250,7 @@ func (r *RingFilter[T]) ReadFromIf(b gio.Reader[T], cond func() bool) (n int64, 
 		num, err = b.Read(r.items[r.write:len(r.items)])
 
 		if n < 0 {
-			panic(errNegativeRead)
+			return n, ErrRingFilterNegativeRead
 		}
 
 		n += int64(num)
@@ -300,6 +309,101 @@ func (r *RingFilter[T]) Len() int {
 // total ring buffer's capacity.
 func (r *RingFilter[T]) Cap() int {
 	return len(r.items)
+}
+
+// Truncate serves as an alias to Reset(); to preserve the ring buffer size
+func (r *RingFilter[T]) Truncate(int) {
+	r.Reset()
+}
+
+// Reset resets the buffer to be empty,
+// but it retains the underlying storage for use by future writes.
+// Reset is the same as Truncate().
+func (r *RingFilter[T]) Reset() {
+	r.read = 0
+	r.write = 0
+
+	// reset the buffer preventing further reads to show the previous data
+	for i := range r.items {
+		var zero T
+
+		r.items[i] = zero
+	}
+}
+
+func (r *RingFilter[T]) Next(n int) (items []T) {
+	switch {
+	case n == 0:
+		return nil
+	case n > r.Len():
+		return r.Value()
+	default:
+		items = make([]T, n)
+		_, _ = r.Read(items)
+
+		return items
+	}
+}
+
+func (r *RingFilter[T]) UnreadItem() error {
+	if r.read == r.write {
+		return ErrRingFilterUnreadItem
+	}
+
+	r.read = (r.read - 1) % len(r.items)
+
+	return nil
+}
+
+func (r *RingFilter[T]) ReadItems(delim func(T) bool) (line []T, err error) {
+	line = make([]T, 0, len(r.items))
+
+	switch {
+	case r.read >= r.write:
+		for i := r.read; i < len(r.items); i++ {
+			if delim(r.items[i]) {
+				return line[:len(line):len(line)], nil
+			}
+
+			line = append(line, r.items[i])
+		}
+
+		fallthrough
+	default:
+		for i := 0; i < r.write; i++ {
+			if delim(r.items[i]) {
+				return line[:len(line):len(line)], nil
+			}
+
+			line = append(line, r.items[i])
+		}
+	}
+
+	return line[:len(line):len(line)], nil
+}
+
+// ReadItem reads and returns the next T item from the buffer.
+// If no T item is available, it returns error io.EOF.
+func (r *RingFilter[T]) ReadItem() (item T, err error) {
+	item = r.items[r.read]
+	r.read = (r.read + 1) % len(r.items)
+
+	return item, nil
+}
+
+// Seek implements the gio.Seeker interface. All valid whence will point to
+// the current cursor's (read) position
+func (r *RingFilter[T]) Seek(offset int64, whence int) (abs int64, err error) {
+	switch whence {
+	case gio.SeekStart, gio.SeekCurrent, gio.SeekEnd:
+		abs = (int64(r.read) + offset) % int64(len(r.items))
+	default:
+		return 0, ErrRingFilterInvalidWhence
+	}
+
+	r.read = int(abs)
+
+	return abs, nil
 }
 
 // NewRingFilter creates a RingFilter of type `T` and size `size`, with process function `fn`
