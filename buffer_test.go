@@ -353,8 +353,8 @@ func TestReadFromNegativeReader(t *testing.T) {
 			t.Fatal("gbuf.Buffer.ReadFrom didn't panic")
 		case error:
 			// this is the error string of errNegativeRead
-			wantError := "gbuf.Buffer: reader returned negative count from Read"
-			if err.Error() != wantError {
+			wantError := gbuf.ErrBufferNegativeRead
+			if !errors.Is(err, wantError) {
 				t.Fatalf("recovered panic: got %v, want %v", err.Error(), wantError)
 			}
 		default:
@@ -499,8 +499,8 @@ func TestGrowOverflow(t *testing.T) {
 	const maxInt = int(^uint(0) >> 1)
 
 	defer func() {
-		if err := recover(); !errors.Is(err.(error), gbuf.ErrTooLarge) {
-			t.Errorf("after too-large Grow, recover() = %v; want %v", err, gbuf.ErrTooLarge)
+		if err := recover(); !errors.Is(err.(error), gbuf.ErrBufferTooLarge) {
+			t.Errorf("after too-large Grow, recover() = %v; want %v", err, gbuf.ErrBufferTooLarge)
 		}
 	}()
 

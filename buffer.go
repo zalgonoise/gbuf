@@ -21,10 +21,6 @@ type Buffer[T any] struct {
 	isReading atomic.Bool // last operation type, so that Unread* can work correctly.
 }
 
-// ErrTooLarge is passed to panic if memory cannot be allocated to store data in a buffer.
-var ErrTooLarge = errors.New("gbuf.Buffer: too large")
-var errNegativeRead = errors.New("gbuf.Buffer: reader returned negative count from Read")
-
 const maxInt = int(^uint(0) >> 1)
 
 // Value returns a slice of length b.Len() holding the unread portion of the buffer.
@@ -86,7 +82,7 @@ func (b *Buffer[T]) tryGrowByReslice(n int) (int, bool) {
 
 // grow grows the buffer to guarantee space for n more T items.
 // It returns the index where T items should be written.
-// If the buffer can't grow it will panic with ErrTooLarge.
+// If the buffer can't grow it will panic with ErrBufferTooLarge.
 func (b *Buffer[T]) grow(n int) int {
 	m := b.Len()
 	// If buffer is empty, reset to recover space.
@@ -113,7 +109,7 @@ func (b *Buffer[T]) grow(n int) int {
 		// don't spend all our time copying.
 		copy(b.buf, b.buf[b.off:])
 	case c > maxInt-c-n:
-		panic(ErrTooLarge)
+		panic(ErrBufferTooLarge)
 	default:
 		// Add b.off to account for b.buf[:b.off] being sliced off the front.
 		b.buf = growSlice(b.buf[b.off:], b.off+n)
@@ -130,10 +126,10 @@ func (b *Buffer[T]) grow(n int) int {
 // another n T items. After Grow(n), at least n T items can be written to the
 // buffer without another allocation.
 // If n is negative, Grow will panic.
-// If the buffer can't grow it will panic with ErrTooLarge.
+// If the buffer can't grow it will panic with ErrBufferTooLarge.
 func (b *Buffer[T]) Grow(n int) {
 	if n < 0 {
-		panic("gbuf.Buffer.Grow: negative count")
+		panic(ErrBufferNegativeCount)
 	}
 
 	m := b.grow(n)
@@ -142,7 +138,7 @@ func (b *Buffer[T]) Grow(n int) {
 
 // Write appends the contents of p to the buffer, growing the buffer as
 // needed. The return value n is the length of p; err is always nil. If the
-// buffer becomes too large, Write will panic with ErrTooLarge.
+// buffer becomes too large, Write will panic with ErrBufferTooLarge.
 func (b *Buffer[T]) Write(p []T) (n int, err error) {
 	b.isReading.Store(false)
 	m, ok := b.tryGrowByReslice(len(p))
@@ -163,7 +159,7 @@ const MinRead = 512
 // ReadFrom reads data from r until EOF and appends it to the buffer, growing
 // the buffer as needed. The return value n is the number of T items read. Any
 // error except io.EOF encountered during the read is also returned. If the
-// buffer becomes too large, ReadFrom will panic with ErrTooLarge.
+// buffer becomes too large, ReadFrom will panic with ErrBufferTooLarge.
 func (b *Buffer[T]) ReadFrom(r gio.Reader[T]) (n int64, err error) {
 	b.isReading.Store(false)
 
@@ -173,7 +169,7 @@ func (b *Buffer[T]) ReadFrom(r gio.Reader[T]) (n int64, err error) {
 		m, e := r.Read(b.buf[i:cap(b.buf)])
 
 		if m < 0 {
-			panic(errNegativeRead)
+			panic(ErrBufferNegativeRead)
 		}
 
 		b.buf = b.buf[:i+m]
@@ -190,11 +186,11 @@ func (b *Buffer[T]) ReadFrom(r gio.Reader[T]) (n int64, err error) {
 }
 
 // growSlice grows b by n, preserving the original content of b.
-// If the allocation fails, it panics with ErrTooLarge.
+// If the allocation fails, it panics with ErrBufferTooLarge.
 func growSlice[T any](b []T, n int) []T {
 	defer func() {
 		if recover() != nil {
-			panic(ErrTooLarge)
+			panic(ErrBufferTooLarge)
 		}
 	}()
 	// TODO(http://golang.org/issue/51462): We should rely on the append-make
@@ -228,7 +224,7 @@ func (b *Buffer[T]) WriteTo(w gio.Writer[T]) (n int64, err error) {
 	if nItems := b.Len(); nItems > 0 {
 		m, e := w.Write(b.buf[b.off:])
 		if m > nItems {
-			panic("gbuf.Buffer.WriteTo: invalid Write count")
+			panic(ErrBufferInvalidWriteCount)
 		}
 
 		b.off += m
@@ -253,7 +249,7 @@ func (b *Buffer[T]) WriteTo(w gio.Writer[T]) (n int64, err error) {
 // WriteItem appends the T `item` to the buffer, growing the buffer as needed.
 // The returned error is always nil, but is included to match gio.Writer's
 // WriteItem. If the buffer becomes too large, WriteItem will panic with
-// ErrTooLarge.
+// ErrBufferTooLarge.
 func (b *Buffer[T]) WriteItem(item T) error {
 	b.isReading.Store(false)
 	m, ok := b.tryGrowByReslice(1)
@@ -336,15 +332,13 @@ func (b *Buffer[T]) ReadItem() (T, error) {
 	return c, nil
 }
 
-var ErrUnreadItem = errors.New("gbuf.Buffer: UnreadItem: previous operation was not a successful read")
-
 // UnreadItem unreads the last T item returned by the most recent successful
 // read operation that read at least one T item. If a write operation has happened since
 // the last read, if the last read returned an error, or if the read operation reads zero
 // T items, UnreadItem returns an error.
 func (b *Buffer[T]) UnreadItem() error {
 	if !b.isReading.Load() {
-		return ErrUnreadItem
+		return ErrBufferUnreadItem
 	}
 
 	b.isReading.Store(false)
