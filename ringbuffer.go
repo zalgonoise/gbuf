@@ -9,11 +9,6 @@ import (
 
 const defaultBufferSize = 256
 
-var (
-	ErrRingNegativePosition = errors.New("gbuf.RingBuffer.Seek: negative position")
-	ErrRingInvalidWhence    = errors.New("gbuf.RingBuffer.Seek: invalid whence")
-)
-
 // RingBuffer is a buffer that is connected end-to-end, which allows continuous
 // reads and writes provided that the caller is aware of potential loss of read data
 // (as elements are overwritten if not read)
@@ -88,8 +83,8 @@ func (r *RingBuffer[T]) WriteItem(item T) (err error) {
 		r.read = pos
 	}
 
-	r.write = pos
 	r.items[r.write] = item
+	r.write = pos
 
 	return nil
 }
@@ -204,7 +199,7 @@ func (r *RingBuffer[T]) ReadFrom(b gio.Reader[T]) (n int64, err error) {
 		num, err = b.Read(r.items[r.write:len(r.items)])
 
 		if n < 0 {
-			panic(errNegativeRead)
+			return n, ErrRingBufferNegativeRead
 		}
 
 		n += int64(num)
@@ -232,7 +227,7 @@ func (r *RingBuffer[T]) ReadFromIf(b gio.Reader[T], cond func() bool) (n int64, 
 		num, err = b.Read(r.items[r.write:len(r.items)])
 
 		if n < 0 {
-			panic(errNegativeRead)
+			return n, ErrRingBufferNegativeRead
 		}
 
 		n += int64(num)
@@ -254,7 +249,7 @@ func (r *RingBuffer[T]) ReadFromIf(b gio.Reader[T], cond func() bool) (n int64, 
 // WriteTo writes data to w until the buffer is drained or an error occurs.
 // The return value n is the number of T items written; it always fits into an
 // int, but it is int64 to match the gio.WriterTo interface. Any error
-// encountered during the write is also returned.
+// encountered during the write operation is also returned.
 func (r *RingBuffer[T]) WriteTo(b gio.Writer[T]) (n int64, err error) {
 	var num int
 
@@ -263,7 +258,7 @@ func (r *RingBuffer[T]) WriteTo(b gio.Writer[T]) (n int64, err error) {
 		num, err = b.Write(r.items[r.read:len(r.items)])
 
 		if n < 0 {
-			panic(errNegativeRead)
+			return n, ErrRingBufferNegativeRead
 		}
 
 		n += int64(num)
@@ -283,7 +278,7 @@ func (r *RingBuffer[T]) WriteTo(b gio.Writer[T]) (n int64, err error) {
 		num, err = b.Write(r.items[r.read:r.write])
 
 		if n < 0 {
-			panic(errNegativeRead)
+			return n, ErrRingBufferNegativeRead
 		}
 
 		n += int64(num)
@@ -303,90 +298,54 @@ func (r *RingBuffer[T]) WriteTo(b gio.Writer[T]) (n int64, err error) {
 }
 
 func (r *RingBuffer[T]) Next(n int) (items []T) {
-	if n == 0 {
+	switch {
+	case n == 0:
 		return nil
+	case n > r.Len():
+		return r.Value()
+	default:
+		items = make([]T, n)
+		_, _ = r.Read(items)
+
+		return items
 	}
-
-	// TODO: refactor
-	//
-	//	if n < 0 || n > r.Len() {
-	//		panic("gbuf.RingBuffer: out of range")
-	//	}
-	//
-	//	if r.start+n < r.end {
-	//		items = append(items, r.items[r.start:r.start+n]...)
-	//		r.start += n
-	//
-	//		return items
-	//	}
-	//
-	//	items = append(items, r.items[r.start-1:]...)
-	//	items = append(items, r.items[:n]...)
-	//	r.start = n
-
-	return items
 }
 
 func (r *RingBuffer[T]) UnreadItem() error {
-	// TODO: refactor
-	//	if r.start == r.end {
-	//		return ErrUnreadItem
-	//	}
-	//
-	//	r.start = (r.start - 1) % len(r.items)
-	//
+	if r.read == r.write {
+		return ErrRingBufferUnreadItem
+	}
+
+	r.read = (r.read - 1) % len(r.items)
+
 	return nil
 }
 
 func (r *RingBuffer[T]) ReadItems(delim func(T) bool) (line []T, err error) {
-	_ = delim
+	line = make([]T, 0, len(r.items))
 
-	if r.read == r.write {
-		return line, io.EOF
+	switch {
+	case r.read >= r.write:
+		for i := r.read; i < len(r.items); i++ {
+			if delim(r.items[i]) {
+				return line[:len(line):len(line)], nil
+			}
+
+			line = append(line, r.items[i])
+		}
+
+		fallthrough
+	default:
+		for i := 0; i < r.write; i++ {
+			if delim(r.items[i]) {
+				return line[:len(line):len(line)], nil
+			}
+
+			line = append(line, r.items[i])
+		}
 	}
 
-	// TODO: refactor
-	//
-	//	if r.start < r.end {
-	//		var i int
-	//
-	//		for i = r.start; i < r.end; i++ {
-	//			if delim(r.items[i]) {
-	//				break
-	//			}
-	//		}
-	//
-	//		line = append(line, r.items[r.start:r.start+i+1]...)
-	//		r.start += i + 1
-	//
-	//		return line, nil
-	//	}
-	//
-	//	var (
-	//		i    int
-	//		done bool
-	//	)
-	//
-	//	for i = r.start; i < len(r.items); i++ {
-	//		if delim(r.items[i]) {
-	//			done = true
-	//			break
-	//		}
-	//	}
-	//
-	//	line = append(line, r.items[r.start:r.start+i+1]...)
-	//
-	//	if !done {
-	//		for i = 0; i < r.end; i++ {
-	//			if delim(r.items[i]) {
-	//				break
-	//			}
-	//		}
-	//
-	//		line = append(line, r.items[r.start:r.start+i+1]...)
-	//	}
-
-	return line, nil
+	return line[:len(line):len(line)], nil
 }
 
 // ReadItem reads and returns the next T item from the buffer.
@@ -401,28 +360,14 @@ func (r *RingBuffer[T]) ReadItem() (item T, err error) {
 // Seek implements the gio.Seeker interface. All valid whence will point to
 // the current cursor's (read) position
 func (r *RingBuffer[T]) Seek(offset int64, whence int) (abs int64, err error) {
-	_, _ = offset, whence
+	switch whence {
+	case gio.SeekStart, gio.SeekCurrent, gio.SeekEnd:
+		abs = (int64(r.read) + offset) % int64(len(r.items))
+	default:
+		return 0, ErrRingBufferInvalidWhence
+	}
 
-	// TODO: refactor
-	//
-	//	var abs int64
-	//
-	//	switch whence {
-	//	case gio.SeekStart, gio.SeekCurrent, gio.SeekEnd:
-	//		if (r.start + int(offset)) < len(r.items) {
-	//			abs = int64(r.start) + offset
-	//		} else {
-	//			abs = offset - int64(len(r.items)-r.start)
-	//		}
-	//	default:
-	//		return 0, ErrRingInvalidWhence
-	//	}
-	//
-	//	if abs < 0 {
-	//		return 0, ErrRingNegativePosition
-	//	}
-	//
-	//	r.start = int(abs)
+	r.read = int(abs)
 
 	return abs, nil
 }

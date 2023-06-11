@@ -71,21 +71,21 @@ func TestRingBufferWrite(t *testing.T) {
 	})
 }
 
-//	func TestRingBufferWriteItem(t *testing.T) {
-//		t.Run("Success", func(t *testing.T) {
-//			input := []byte("hello world")
-//			r := NewRingBuffer[byte](11)
-//			for _, b := range input {
-//				err := r.WriteItem(b)
-//				if err != nil {
-//					t.Error(err)
-//				}
-//			}
-//			if string(r.items) != string(input) {
-//				t.Errorf("written data mismatch: wanted %s ; got %s", string(input), string(r.items))
-//			}
-//		})
-//	}
+func TestRingBufferWriteItem(t *testing.T) {
+	t.Run("Success", func(t *testing.T) {
+		input := []byte("hello world")
+		r := NewRingBuffer[byte](11)
+		for _, b := range input {
+			err := r.WriteItem(b)
+			if err != nil {
+				t.Error(err)
+			}
+		}
+		if string(r.items) != string(input) {
+			t.Errorf("written data mismatch: wanted %s ; got %s", string(input), string(r.items))
+		}
+	})
+}
 
 func TestRingBufferRead(t *testing.T) {
 	t.Run("Success", func(t *testing.T) {
