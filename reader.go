@@ -1,17 +1,9 @@
 package gbuf
 
 import (
-	"errors"
 	"io"
 
 	"github.com/zalgonoise/gio"
-)
-
-var (
-	ErrReaderNegativePosition = errors.New("gbuf.Reader.Seek: negative position")
-	ErrReaderInvalidWhence    = errors.New("gbuf.Reader.Seek: invalid whence")
-	ErrReaderAtTheBeginning   = errors.New("gbuf.Reader.UnreadItem: at beginning of slice")
-	ErrReaderNegativeOffset   = errors.New("gbuf.Reader.ReadAt: negative offset")
 )
 
 // A Reader implements the gio.Reader, gio.ReaderAt, gio.WriterTo, gio.Seeker,
@@ -136,7 +128,7 @@ func (r *Reader[T]) WriteTo(w gio.Writer[T]) (n int64, err error) {
 	m, err := w.Write(b)
 
 	if m > len(b) {
-		panic("gbuf.Reader.WriteTo: invalid Write count")
+		return n, ErrReaderNegativeCount
 	}
 
 	r.i += int64(m)
