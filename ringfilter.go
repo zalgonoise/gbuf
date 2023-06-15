@@ -217,14 +217,14 @@ func (r *RingFilter[T]) ReadFrom(b gio.Reader[T]) (n int64, err error) {
 	for {
 		num, err = b.Read(r.items[r.write:len(r.items)])
 
-		if n < 0 {
+		if num < 0 {
 			return n, ErrRingFilterNegativeRead
 		}
 
 		n += int64(num)
 
 		if errFilter := r.fn(r.items[r.write : r.write+num]); errFilter != nil {
-			return n, err
+			return n, errFilter
 		}
 
 		r.write = (r.write + num) % len(r.items)
