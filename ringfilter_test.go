@@ -97,41 +97,54 @@ func TestRingFilter_Write_Sequential(t *testing.T) {
 
 func TestRingFilter_Read(t *testing.T) {
 	for _, testcase := range []struct {
-		name  string
-		input string
-		size  int
-		wants string
-		err   error
+		name     string
+		input    string
+		size     int
+		readSize int
+		wants    string
+		err      error
 	}{
 		{
-			name:  "Simple",
-			input: "very long string buffered every 5 characters",
-			size:  5,
-			wants: "cters",
+			name:     "Simple",
+			input:    "very long string buffered every 5 characters",
+			size:     5,
+			readSize: 5,
+			wants:    "cters",
 		},
 		{
-			name:  "Short",
-			input: "x",
-			size:  10,
-			wants: "x\x00\x00\x00\x00\x00\x00\x00\x00\x00", // zero bytes as buffer isn't filled
+			name:     "Short",
+			input:    "x",
+			size:     10,
+			readSize: 10,
+			wants:    "x\x00\x00\x00\x00\x00\x00\x00\x00\x00", // zero bytes as buffer isn't filled
 		},
 		{
-			name:  "ByteAtATime",
-			input: "one byte at a time",
-			size:  1,
-			wants: "e",
+			name:     "ByteAtATime",
+			input:    "one byte at a time",
+			size:     1,
+			readSize: 1,
+			wants:    "e",
 		},
 		{
-			name:  "Full",
-			input: "complete string",
-			size:  15,
-			wants: "complete string",
+			name:     "Full",
+			input:    "complete string",
+			size:     15,
+			readSize: 15,
+			wants:    "complete string",
 		},
 		{
-			name:  "FullWithExtraSpace",
-			input: "complete string",
-			size:  20,
-			wants: "complete string\x00\x00\x00\x00\x00",
+			name:     "FullWithExtraSpace",
+			input:    "complete string",
+			size:     20,
+			readSize: 20,
+			wants:    "complete string\x00\x00\x00\x00\x00",
+		},
+		{
+			name:     "FullWithShortRead",
+			input:    "string",
+			size:     6,
+			readSize: 3,
+			wants:    "str",
 		},
 	} {
 		t.Run(testcase.name, func(t *testing.T) {
@@ -142,7 +155,7 @@ func TestRingFilter_Read(t *testing.T) {
 			_, err := r.Write([]byte(testcase.input))
 			require.NoError(t, err)
 
-			buf := make([]byte, testcase.size)
+			buf := make([]byte, testcase.readSize)
 			_, err = r.Read(buf)
 			require.ErrorIs(t, err, testcase.err)
 			require.Equal(t, testcase.wants, string(buf))

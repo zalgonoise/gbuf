@@ -178,6 +178,9 @@ func (r *RingFilter[T]) Read(p []T) (n int, err error) {
 	switch {
 	case r.read >= r.write:
 		size := len(r.items) - r.read
+		if ln < ringLn {
+			size = r.write + ln
+		}
 
 		n += copy(p[:size], r.items[r.read:len(r.items)])
 		r.read = 0
