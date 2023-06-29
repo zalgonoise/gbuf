@@ -274,25 +274,35 @@ func BenchmarkRingFilter_Write(b *testing.B) {
 	}
 }
 
-func TestRingFilter_ReadFrom(t *testing.T) {
+func TestRingFilter_ReadFrom_Read(t *testing.T) {
 	for _, testcase := range []struct {
 		name  string
 		input string
+		wants string
 		size  int
 	}{
 		{
-			name:  "Simple",
-			input: "very long string buffered every 5 characters",
+			name:  "Simple/ProportionalBufferSize",
+			input: "very long string buffered every 5 characters", // len: 44; 44 % 4 = 0
+			wants: "ters",
+			size:  4,
+		},
+		{
+			name:  "Simple/OffsetBufferSize",
+			input: "very long string buffered every 5 characters", // len: 44; 44 % 5 = 4
+			wants: "cters",
 			size:  5,
 		},
 		{
 			name:  "Short",
 			input: "x",
+			wants: "x\x00\x00\x00\x00\x00\x00\x00\x00\x00",
 			size:  10,
 		},
 		{
 			name:  "ByteAtATime",
 			input: "one byte at a time",
+			wants: "e",
 			size:  1,
 		},
 	} {
@@ -307,6 +317,12 @@ func TestRingFilter_ReadFrom(t *testing.T) {
 			_, err := r.ReadFrom(bytes.NewReader([]byte(testcase.input)))
 			require.NoError(t, err)
 			require.Equal(t, testcase.input, string(output))
+
+			var read = make([]byte, testcase.size)
+			n, err := r.Read(read)
+			require.Greater(t, n, 0)
+			require.NoError(t, err)
+			require.Equal(t, testcase.wants, string(read))
 		})
 	}
 }
