@@ -227,6 +227,16 @@ func (r *RingFilter[T]) ReadFrom(b gio.Reader[T]) (n int64, err error) {
 		// read from r.write until the end of the RingFilter buffer
 		num, err = b.Read(r.items[r.write:len(r.items)])
 
+		// early exit if io.EOF is raised
+		if errors.Is(err, io.EOF) {
+			// io.EOF indicates the input gio.Reader is depleted, exit without raising an error as the operation was OK
+			return n, nil
+		}
+
+		if err != nil {
+			return n, err
+		}
+
 		switch {
 		case num < 0:
 			return n, ErrRingFilterNegativeRead
@@ -245,15 +255,6 @@ func (r *RingFilter[T]) ReadFrom(b gio.Reader[T]) (n int64, err error) {
 
 		if moveRead {
 			r.read = r.write
-		}
-
-		if errors.Is(err, io.EOF) {
-			// io.EOF indicates the input gio.Reader is depleted, exit without raising an error as the operation was OK
-			return n, nil
-		}
-
-		if err != nil {
-			return n, err
 		}
 	}
 }
