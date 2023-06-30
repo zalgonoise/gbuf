@@ -327,6 +327,77 @@ func TestRingFilter_ReadFrom_Read(t *testing.T) {
 	}
 }
 
+func TestRingFilter_ReadFrom_Interleaved(t *testing.T) {
+	for _, testcase := range []struct {
+		name  string
+		input []string
+		wants string
+		size  int
+	}{
+		{
+			name:  "Simple/FollowReadPosition",
+			input: []string{"very long stri", "ng ", "buffered ev", "ery", " 5 characters"}, // len: 44; 44 % 4 = 0
+			wants: "ters",
+			size:  4,
+		},
+		{
+			name:  "Simple/WithinSize",
+			input: []string{"very long ", "string buf", "fered ever", "y 10 chara", "cters"}, // len: 44; 44 % 5 = 4
+			wants: "very long string buffered every 10 characters",
+			size:  45,
+		},
+		{
+			name:  "Short/WriteByteAtATime",
+			input: []string{"x", "y", "z", "0", "1", "2", "3"},
+			wants: "xyz0123\x00\x00\x00",
+			size:  10,
+		},
+		{
+			name:  "Short/SizeOne",
+			input: []string{"keep a single byte", "no extras", "only store the last", "\x00", "character", "e"},
+			wants: "e",
+			size:  1,
+		},
+	} {
+		t.Run(testcase.name, func(t *testing.T) {
+			var output = bytes.NewBuffer(make([]byte, 0, 128))
+
+			r := NewRingFilter(testcase.size, func(b []byte) error {
+				_, err := output.Write(b)
+				return err
+			})
+
+			var swap bool
+
+			for i := range testcase.input {
+
+				if swap {
+					_, err := r.Write([]byte(testcase.input[i]))
+					require.NoError(t, err)
+					require.Equal(t, testcase.input[i], output.String())
+					output.Reset()
+
+					swap = !swap
+					continue
+				}
+
+				_, err := r.ReadFrom(bytes.NewReader([]byte(testcase.input[i])))
+				require.NoError(t, err)
+				require.Equal(t, testcase.input[i], output.String())
+				output.Reset()
+
+				swap = !swap
+			}
+
+			var read = make([]byte, testcase.size)
+			n, err := r.Read(read)
+			require.Greater(t, n, 0)
+			require.NoError(t, err)
+			require.Equal(t, testcase.wants, string(read))
+		})
+	}
+}
+
 func TestRingFilter_WriteTo(t *testing.T) {
 	for _, testcase := range []struct {
 		name  string
