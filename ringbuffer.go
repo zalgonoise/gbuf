@@ -3,6 +3,7 @@ package gbuf
 import (
 	"errors"
 	"io"
+	"sync/atomic"
 
 	"github.com/zalgonoise/gio"
 )
@@ -13,14 +14,22 @@ const defaultBufferSize = 256
 // reads and writes provided that the caller is aware of potential loss of read data
 // (as elements are overwritten if not read)
 type RingBuffer[T any] struct {
+	// indicates whether the write operation is currently overwriting the buffer, so that r.read follows r.write
+	followRead atomic.Bool
+
 	write int
 	read  int
+
 	items []T
 }
 
 func (r *RingBuffer[T]) writeWithinBounds(p []T, end int) (n int, err error) {
 	n = copy(r.items[r.write:end], p)
 	r.write = end
+
+	if r.followRead.Load() {
+		r.read = end
+	}
 
 	return n, nil
 }
@@ -29,9 +38,10 @@ func (r *RingBuffer[T]) writeWrapped(p []T, end int) (n int, err error) {
 	end %= len(r.items)
 	n = copy(r.items[r.write:len(r.items)], p)
 	n += copy(r.items[:end], p[n:])
+
 	r.write = end
 
-	if end > r.read {
+	if r.followRead.Load() || end > r.read {
 		// overwritten items, set read point to write
 		r.read = r.write
 	}
@@ -79,8 +89,11 @@ func (r *RingBuffer[T]) Write(p []T) (n int, err error) {
 // overwritten
 func (r *RingBuffer[T]) WriteItem(item T) (err error) {
 	pos := (r.write + 1) % len(r.items)
-	if r.write == r.read {
+
+	if r.followRead.Load() {
 		r.read = pos
+	} else if pos == r.read {
+		r.followRead.Store(true)
 	}
 
 	r.items[r.write] = item
@@ -102,6 +115,9 @@ func (r *RingBuffer[T]) Read(p []T) (n int, err error) {
 	switch {
 	case r.read >= r.write:
 		size := len(r.items) - r.read
+		if ln < ringLn {
+			size = r.write + ln
+		}
 
 		n += copy(p[:size], r.items[r.read:len(r.items)])
 		r.read = 0
