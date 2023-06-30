@@ -79,6 +79,7 @@ func (r *RingBuffer[T]) Write(p []T) (n int, err error) {
 	copy(r.items, p[ln-ringLn:])
 	// full circle, reset read index to write point
 	r.read = r.write
+	r.followRead.Store(true)
 
 	return ringLn, nil
 }
