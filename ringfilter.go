@@ -3,6 +3,7 @@ package gbuf
 import (
 	"errors"
 	"io"
+	"sync/atomic"
 
 	"github.com/zalgonoise/gio"
 )
@@ -11,8 +12,12 @@ import (
 // reads and writes where the caller configures a callback function to process
 // all items on each loop
 type RingFilter[T any] struct {
+	// indicates whether the write operation is currently overwriting the buffer, so that r.read follows r.write
+	followRead atomic.Bool
+
 	write int
 	read  int
+
 	fn    func([]T) error
 	items []T
 }
@@ -23,6 +28,10 @@ func (r *RingFilter[T]) writeWithinBounds(p []T, end int) (n int, err error) {
 	err = r.fn(r.items[r.write:end])
 
 	r.write = end
+
+	if r.followRead.Load() {
+		r.read = end
+	}
 
 	if err != nil {
 		return n, err
@@ -47,7 +56,8 @@ func (r *RingFilter[T]) writeWrapped(p []T, end int) (n int, err error) {
 	err = r.fn(r.items[:end])
 
 	r.write = end
-	if end > r.read {
+
+	if r.followRead.Load() || end > r.read {
 		// overwritten items, set read point to write
 		r.read = r.write
 	}
@@ -104,8 +114,11 @@ func (r *RingFilter[T]) Write(p []T) (n int, err error) {
 // overwritten
 func (r *RingFilter[T]) WriteItem(item T) (err error) {
 	pos := (r.write + 1) % len(r.items)
-	if r.write == r.read {
+
+	if r.followRead.Load() {
 		r.read = pos
+	} else if pos == r.read {
+		r.followRead.Store(true)
 	}
 
 	r.items[r.write] = item
@@ -218,8 +231,6 @@ func (r *RingFilter[T]) ReadFrom(b gio.Reader[T]) (n int64, err error) {
 	var (
 		// initialize a counter for each iteration's written items
 		num int
-		// indicates whether the write operation is currently overwriting the buffer, so that r.read follows r.write
-		moveRead bool
 	)
 
 	// read the stream's items until the reader is depleted of any more data
@@ -242,7 +253,7 @@ func (r *RingFilter[T]) ReadFrom(b gio.Reader[T]) (n int64, err error) {
 			return n, ErrRingFilterNegativeRead
 		case num >= r.Len():
 			// if the number of written items fills the buffer, the read index must follow the write index
-			moveRead = true
+			r.followRead.Store(true)
 		}
 
 		n += int64(num)
@@ -253,7 +264,7 @@ func (r *RingFilter[T]) ReadFrom(b gio.Reader[T]) (n int64, err error) {
 
 		r.write = (r.write + num) % len(r.items)
 
-		if moveRead {
+		if r.followRead.Load() {
 			r.read = r.write
 		}
 	}
