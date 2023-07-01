@@ -452,3 +452,58 @@ func TestRingFilter_WriteTo(t *testing.T) {
 		})
 	}
 }
+
+func TestRingFilter_ReadFrom_Nested_AsConverter(t *testing.T) {
+	type nested struct {
+		ints   *RingFilter[int8]
+		floats *RingFilter[float64]
+	}
+
+	const maxInt8 float64 = 1<<7 - 1
+
+	for _, testcase := range []struct {
+		name  string
+		input []int8
+		wants []float64
+		size  int
+		newFn func() nested
+	}{
+		{
+			name:  "Simple/3Items",
+			input: []int8{1, 2, -3, -4, 5, 6, -7, -8, 9, 0, 127, -127},
+			wants: []float64{0, 1, -1},
+			size:  3,
+			newFn: func() nested {
+				n := nested{
+					floats: NewRingFilter[float64](3, nil),
+				}
+
+				n.ints = NewRingFilter(3, func(data []int8) error {
+					floats := make([]float64, len(data))
+					for i := range data {
+						floats[i] = float64(data[i]) / maxInt8
+					}
+
+					_, err := n.floats.Write(floats)
+					return err
+				})
+
+				return n
+			},
+		},
+	} {
+		t.Run(testcase.name, func(t *testing.T) {
+			buf := testcase.newFn()
+
+			intReader := NewReader(testcase.input)
+
+			_, err := buf.ints.ReadFrom(intReader)
+			require.NoError(t, err)
+
+			output := make([]float64, testcase.size)
+			_, err = buf.floats.Read(output)
+			require.NoError(t, err)
+			require.Equal(t, testcase.wants, output)
+		})
+	}
+}
