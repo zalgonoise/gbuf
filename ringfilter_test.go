@@ -469,8 +469,31 @@ func TestRingFilter_ReadFrom_Nested_AsConverter(t *testing.T) {
 		newFn func() nested
 	}{
 		{
-			name:  "Simple/3Items",
+			name:  "Simple/3Items/WriteWithinBounds",
 			input: []int8{1, 2, -3, -4, 5, 6, -7, -8, 9, 0, 127, -127},
+			wants: []float64{0, 1, -1},
+			size:  3,
+			newFn: func() nested {
+				n := nested{
+					floats: NewRingFilter[float64](3, nil),
+				}
+
+				n.ints = NewRingFilter(3, func(data []int8) error {
+					floats := make([]float64, len(data))
+					for i := range data {
+						floats[i] = float64(data[i]) / maxInt8
+					}
+
+					_, err := n.floats.Write(floats)
+					return err
+				})
+
+				return n
+			},
+		},
+		{
+			name:  "Simple/3Items/WriteOutOfBounds",
+			input: []int8{1, 2, -3, -4, 5, 6, -7, 0, 127, -127},
 			wants: []float64{0, 1, -1},
 			size:  3,
 			newFn: func() nested {
