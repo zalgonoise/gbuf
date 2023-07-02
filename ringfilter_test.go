@@ -530,3 +530,44 @@ func TestRingFilter_ReadFrom_Nested_AsConverter(t *testing.T) {
 		})
 	}
 }
+
+func TestRingFilter_Value(t *testing.T) {
+	for _, testcase := range []struct {
+		name     string
+		input    []int
+		readPos  int
+		writePos int
+		wants    []int
+	}{
+		{
+			name:  "Simple/ReadWriteAtZero",
+			input: []int{1, 2, 3, 4, 5, 6, 7, 8, 9},
+			wants: []int{1, 2, 3, 4, 5, 6, 7, 8, 9},
+		},
+		{
+			name:     "Simple/ReadThreeItems",
+			input:    []int{1, 2, 3, 4, 5, 6, 7, 8, 9},
+			writePos: 3,
+			wants:    []int{1, 2, 3},
+		},
+		{
+			name:     "Simple/RoundTripAtMidPoint",
+			input:    []int{1, 2, 3, 4, 5, 6, 7, 8, 9},
+			readPos:  3,
+			writePos: 3,
+			wants:    []int{4, 5, 6, 7, 8, 9, 1, 2, 3},
+		},
+	} {
+		t.Run(testcase.name, func(t *testing.T) {
+			buf := NewRingFilter[int](len(testcase.input), nil)
+			_, err := buf.Write(testcase.input)
+			require.NoError(t, err)
+
+			buf.read = testcase.readPos
+			buf.write = testcase.writePos
+
+			output := buf.Value()
+			require.Equal(t, testcase.wants, output)
+		})
+	}
+}
