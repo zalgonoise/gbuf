@@ -320,8 +320,8 @@ func (r *RingFilter[T]) Value() (items []T) {
 		copy(items, r.items)
 	default:
 		items = make([]T, len(r.items))
-		copy(items[:r.read], r.items[r.read:])
-		copy(items[r.read:], r.items[:r.read])
+		copy(items[:len(r.items)-r.read], r.items[r.read:])
+		copy(items[len(r.items)-r.read:], r.items[:r.read])
 	}
 
 	return items
