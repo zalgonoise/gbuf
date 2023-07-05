@@ -571,3 +571,206 @@ func TestRingFilter_Value(t *testing.T) {
 		})
 	}
 }
+
+func TestRingFilter_WriteItem_ReadItem_Read(t *testing.T) {
+	for _, testcase := range []struct {
+		name       string
+		size       int
+		writeItems []byte
+		readItems  []byte
+		wants      string
+	}{
+		{
+			name:       "Simple/NoReads",
+			size:       3,
+			writeItems: []byte("input"),
+			wants:      "put",
+		},
+		{
+			name:       "Simple/WithReads",
+			size:       5,
+			writeItems: []byte("input"),
+			readItems:  []byte("in"),
+			wants:      "put\x00\x00",
+		},
+	} {
+		t.Run(testcase.name, func(t *testing.T) {
+			buf := NewRingFilter[byte](testcase.size, nil)
+
+			for i := range testcase.writeItems {
+				err := buf.WriteItem(testcase.writeItems[i])
+				require.NoError(t, err)
+			}
+
+			readItems := make([]byte, 0, len(testcase.readItems))
+			for range testcase.readItems {
+				item, err := buf.ReadItem()
+				require.NoError(t, err)
+				readItems = append(readItems, item)
+			}
+
+			require.Equal(t, string(testcase.readItems), string(readItems))
+
+			output := make([]byte, testcase.size)
+			_, err := buf.Read(output)
+			require.NoError(t, err)
+
+			require.Equal(t, testcase.wants, string(output))
+		})
+	}
+}
+
+func TestRingFilter_UnreadItem(t *testing.T) {
+	for _, testcase := range []struct {
+		name       string
+		size       int
+		input      []byte
+		numReads   int
+		numUnreads int
+		wants      string
+		err        error
+	}{
+		{
+			name:       "Simple/Success/ReadTwice_UnreadOnce",
+			size:       5,
+			input:      []byte("input"),
+			numReads:   2,
+			numUnreads: 1,
+			wants:      "nput\x00",
+		},
+		{
+			name:       "Simple/Fail/UnreadOnce",
+			size:       5,
+			input:      []byte("input"),
+			numReads:   0,
+			numUnreads: 1,
+			err:        ErrRingFilterUnreadItem,
+		},
+	} {
+		t.Run(testcase.name, func(t *testing.T) {
+			buf := NewRingFilter[byte](testcase.size, nil)
+
+			_, err := buf.Write(testcase.input)
+			require.NoError(t, err)
+
+			readItems := make([]byte, testcase.numReads)
+			_, err = buf.Read(readItems)
+			require.NoError(t, err)
+
+			for i := 0; i < testcase.numUnreads; i++ {
+				err = buf.UnreadItem()
+				if err != nil {
+					require.ErrorIs(t, err, testcase.err)
+					return
+				}
+			}
+
+			output := make([]byte, testcase.size)
+			_, err = buf.Read(output)
+			require.NoError(t, err)
+			require.Equal(t, testcase.wants, string(output))
+		})
+	}
+}
+
+func TestRingFilter_Next(t *testing.T) {
+	for _, testcase := range []struct {
+		name    string
+		size    int
+		input   []byte
+		numNext int
+		wants   string
+	}{
+		{
+			name:    "Simple/Next3Items",
+			size:    5,
+			input:   []byte("input"),
+			numNext: 3,
+			wants:   "inp",
+		},
+		{
+			name:    "Simple/Overflow",
+			size:    5,
+			input:   []byte("input"),
+			numNext: 10,
+			wants:   "input",
+		},
+		{
+			name:    "Simple/Zero",
+			size:    5,
+			input:   []byte("input"),
+			numNext: 0,
+			wants:   "",
+		},
+		{
+			name:    "Simple/Negative",
+			size:    5,
+			input:   []byte("input"),
+			numNext: -1,
+			wants:   "",
+		},
+	} {
+		t.Run(testcase.name, func(t *testing.T) {
+			buf := NewRingFilter[byte](testcase.size, nil)
+
+			_, err := buf.Write(testcase.input)
+			require.NoError(t, err)
+
+			output := buf.Next(testcase.numNext)
+			require.Equal(t, testcase.wants, string(output))
+		})
+	}
+}
+
+func TestRingFilter_Truncate(t *testing.T) {
+	for _, testcase := range []struct {
+		name        string
+		size        int
+		input       []byte
+		numTruncate int
+		wants       string
+	}{
+		{
+			name:        "Simple/Truncate2",
+			size:        5,
+			input:       []byte("input"),
+			numTruncate: 2,
+			wants:       "put\x00\x00",
+		},
+		{
+			name:        "Simple/TruncateZero",
+			size:        5,
+			input:       []byte("input"),
+			numTruncate: 0,
+			wants:       "\x00\x00\x00\x00\x00",
+		},
+		{
+			name:        "Simple/TruncateAll",
+			size:        5,
+			input:       []byte("input"),
+			numTruncate: 5,
+			wants:       "\x00\x00\x00\x00\x00",
+		},
+		{
+			name:        "Simple/TruncateOverflow",
+			size:        5,
+			input:       []byte("input"),
+			numTruncate: 10,
+			wants:       "\x00\x00\x00\x00\x00",
+		},
+	} {
+		t.Run(testcase.name, func(t *testing.T) {
+			buf := NewRingFilter[byte](testcase.size, nil)
+
+			_, err := buf.Write(testcase.input)
+			require.NoError(t, err)
+
+			buf.Truncate(testcase.numTruncate)
+
+			output := make([]byte, testcase.size)
+			_, err = buf.Read(output)
+
+			require.Equal(t, testcase.wants, string(output))
+		})
+	}
+}
