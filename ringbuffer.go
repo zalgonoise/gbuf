@@ -121,7 +121,7 @@ func (r *RingBuffer[T]) Read(p []T) (n int, err error) {
 		}
 
 		n += copy(p[:size], r.items[r.read:len(r.items)])
-		r.read = 0
+		r.read = (r.read + n) % len(r.items)
 
 		// don't keep writing if there isn't enough space in p
 		if n >= ln {
@@ -185,9 +185,20 @@ func (r *RingBuffer[T]) Cap() int {
 	return len(r.items)
 }
 
-// Truncate serves as an alias to Reset(); to preserve the ring buffer size
-func (r *RingBuffer[T]) Truncate(int) {
-	r.Reset()
+// Truncate clears `n` items from the read index of the buffer onwards, setting it to a default zero
+// value for the type T
+func (r *RingBuffer[T]) Truncate(n int) {
+	switch {
+	case n <= 0, n > r.Len():
+		r.Reset()
+	default:
+		for i, j := r.read, n; j > 0; i, j = (i+1)%len(r.items), j-1 {
+			var zero T
+
+			r.items[i] = zero
+			r.read = (r.read + 1) % len(r.items)
+		}
+	}
 }
 
 // Reset resets the buffer to be empty,
@@ -316,7 +327,7 @@ func (r *RingBuffer[T]) WriteTo(b gio.Writer[T]) (n int64, err error) {
 
 func (r *RingBuffer[T]) Next(n int) (items []T) {
 	switch {
-	case n == 0:
+	case n <= 0:
 		return nil
 	case n > r.Len():
 		return r.Value()
