@@ -2,6 +2,7 @@ package gbuf
 
 import (
 	"bytes"
+	"io"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -771,6 +772,221 @@ func TestRingFilter_Truncate(t *testing.T) {
 			_, err = buf.Read(output)
 
 			require.Equal(t, testcase.wants, string(output))
+		})
+	}
+}
+
+func TestRingFilter_Seek(t *testing.T) {
+	for _, testcase := range []struct {
+		name       string
+		size       int
+		input      []byte
+		numReads   int
+		whence     int
+		offset     int64
+		wantsAbs   int64
+		wantsValue byte
+		err        error
+	}{
+		{
+			name:       "Simple/NoReads/SeekCurrentPlusOne",
+			size:       5,
+			input:      []byte("input"),
+			whence:     io.SeekCurrent,
+			offset:     1,
+			wantsAbs:   1,
+			wantsValue: 'n',
+		},
+		{
+			name:       "Simple/WithReads/SeekCurrentPlusOne",
+			size:       5,
+			input:      []byte("input"),
+			numReads:   2,
+			whence:     io.SeekCurrent,
+			offset:     1,
+			wantsAbs:   3,
+			wantsValue: 'u',
+		},
+		{
+			name:       "Simple/NoReads/SeekStartPlusOne",
+			size:       5,
+			input:      []byte("input"),
+			whence:     io.SeekStart,
+			offset:     1,
+			wantsAbs:   1,
+			wantsValue: 'n',
+		},
+		{
+			name:       "Simple/WithReads/SeekStartPlusOne",
+			size:       5,
+			input:      []byte("input"),
+			numReads:   2,
+			whence:     io.SeekStart,
+			offset:     1,
+			wantsAbs:   3,
+			wantsValue: 'u',
+		},
+		{
+			name:       "Simple/NoReads/SeekEndMinusOne",
+			size:       5,
+			input:      []byte("inp"),
+			whence:     io.SeekEnd,
+			offset:     -1,
+			wantsAbs:   2,
+			wantsValue: 'p',
+		},
+		{
+			name:       "Simple/WithReads/SeekEndMinusOne",
+			size:       5,
+			input:      []byte("inp"),
+			numReads:   1,
+			whence:     io.SeekEnd,
+			offset:     -1,
+			wantsAbs:   2,
+			wantsValue: 'p',
+		},
+		{
+			name:   "Simple/Fail/InvalidWhence",
+			size:   5,
+			input:  []byte("input"),
+			whence: 99,
+			offset: 1,
+			err:    ErrWhence, // generic whence error
+		},
+		{
+			name:       "Overflow/NoReads/SeekCurrentPlusEleven",
+			size:       5,
+			input:      []byte("input"),
+			whence:     io.SeekCurrent,
+			offset:     11,
+			wantsAbs:   1,
+			wantsValue: 'n',
+		},
+	} {
+		t.Run(testcase.name, func(t *testing.T) {
+			buf := NewRingFilter[byte](testcase.size, nil)
+
+			_, err := buf.Write(testcase.input)
+			require.NoError(t, err)
+
+			if testcase.numReads > 0 {
+				readBytes := make([]byte, testcase.numReads)
+
+				_, err = buf.Read(readBytes)
+				require.NoError(t, err)
+			}
+
+			abs, err := buf.Seek(testcase.offset, testcase.whence)
+			if err != nil {
+				require.ErrorIs(t, err, testcase.err)
+				return
+			}
+
+			require.Equal(t, testcase.wantsAbs, abs)
+			item, err := buf.ReadItem()
+			require.NoError(t, err)
+			require.Equal(t, testcase.wantsValue, item)
+		})
+	}
+}
+
+func TestRingFilter_ReadItems(t *testing.T) {
+	for _, testcase := range []struct {
+		name     string
+		size     int
+		input    []byte
+		numReads int
+		delim    func(byte) bool
+		wants    string
+	}{
+		{
+			name:  "Simple/NoReads/ReadThree",
+			size:  5,
+			input: []byte("input"),
+			delim: func(b byte) bool {
+				return b == 'u'
+			},
+			wants: "inp",
+		},
+		{
+			name:     "Simple/WithReads/ReadThree",
+			size:     5,
+			input:    []byte("input"),
+			numReads: 2,
+			delim: func(b byte) bool {
+				return b == 't'
+			},
+			wants: "pu",
+		},
+		{
+			name:  "Extra/NoReads/HalfwayWritten",
+			size:  5,
+			input: []byte("inp"),
+			delim: func(b byte) bool {
+				return b == 'p'
+			},
+			wants: "in",
+		},
+		{
+			name:  "Extra/NoReads/DelimDoesNotMatch",
+			size:  5,
+			input: []byte("input"),
+			delim: func(b byte) bool {
+				return b == 'z'
+			},
+			wants: "input",
+		},
+	} {
+		t.Run(testcase.name, func(t *testing.T) {
+			buf := NewRingFilter[byte](testcase.size, nil)
+
+			_, err := buf.Write(testcase.input)
+			require.NoError(t, err)
+
+			if testcase.numReads > 0 {
+				readItems := make([]byte, testcase.numReads)
+				_, err = buf.Read(readItems)
+				require.NoError(t, err)
+			}
+
+			items, err := buf.ReadItems(testcase.delim)
+			require.NoError(t, err)
+			require.Equal(t, testcase.wants, string(items))
+		})
+	}
+}
+
+func TestRingFilter_Cap(t *testing.T) {
+	for _, testcase := range []struct {
+		name  string
+		size  int
+		wants int
+	}{
+		{
+			name:  "Simple/Size3",
+			size:  3,
+			wants: 3,
+		},
+		{
+			name:  "Simple/Size1024",
+			size:  1024,
+			wants: 1024,
+		},
+		{
+			name:  "Extra/Size0",
+			size:  0,
+			wants: 256,
+		},
+		{
+			name:  "Extra/NegativeSize",
+			size:  -1,
+			wants: 256,
+		},
+	} {
+		t.Run(testcase.name, func(t *testing.T) {
+			buf := NewRingFilter[byte](testcase.size, nil)
+
+			require.Equal(t, testcase.wants, buf.Cap())
 		})
 	}
 }
