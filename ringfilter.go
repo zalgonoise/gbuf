@@ -209,7 +209,7 @@ func (r *RingFilter[T]) Read(p []T) (n int, err error) {
 
 		return n, nil
 	default:
-		m := copy(p[:ringLn], r.items[r.read:r.write])
+		m := copy(p, r.items[r.read:r.write])
 
 		if ln < m {
 			n = ln
@@ -269,40 +269,6 @@ func (r *RingFilter[T]) ReadFrom(b gio.Reader[T]) (n int64, err error) {
 			r.read = r.write
 		}
 	}
-}
-
-// ReadFromIf extends ReadFrom with a conditional function that is called on each loop.
-// If the condition(s) is / are met, the loop will continue.
-// The return value n is the number of T items read. Any error except io.EOF
-// encountered during the read is also returned.
-func (r *RingFilter[T]) ReadFromIf(b gio.Reader[T], cond func() bool) (n int64, err error) {
-	var num int
-
-	for cond() {
-		num, err = b.Read(r.items[r.write:len(r.items)])
-
-		if n < 0 {
-			return n, ErrRingFilterNegativeRead
-		}
-
-		n += int64(num)
-
-		if errFilter := r.fn(r.items[r.write : r.write+num]); errFilter != nil {
-			return n, err
-		}
-
-		r.write = (r.write + num) % len(r.items)
-
-		if errors.Is(err, io.EOF) {
-			return n, nil
-		}
-
-		if err != nil {
-			return n, err
-		}
-	}
-
-	return n, err
 }
 
 // Value returns a slice of length b.Len() holding the unread portion of the buffer.
@@ -438,7 +404,9 @@ func (r *RingFilter[T]) ReadItem() (item T, err error) {
 // the current cursor's (read) position
 func (r *RingFilter[T]) Seek(offset int64, whence int) (abs int64, err error) {
 	switch whence {
-	case gio.SeekStart, gio.SeekCurrent, gio.SeekEnd:
+	case io.SeekEnd:
+		abs = (int64(r.write) + offset) % int64(len(r.items))
+	case io.SeekCurrent, io.SeekStart:
 		abs = (int64(r.read) + offset) % int64(len(r.items))
 	default:
 		return 0, ErrRingFilterInvalidWhence
