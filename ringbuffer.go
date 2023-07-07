@@ -8,7 +8,7 @@ import (
 	"github.com/zalgonoise/gio"
 )
 
-const defaultBufferSize = 256
+const defaultBufferSize = 256 // minimum value when unset
 
 // RingBuffer is a buffer that is connected end-to-end, which allows continuous
 // reads and writes provided that the caller is aware of potential loss of read data
