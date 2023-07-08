@@ -28,3 +28,55 @@ ________________
 ### Added Features
 
 Besides recently adding `container` library generic implementations (heap, list and ring); I've also extended the concept of the circular buffer with the `RingBuffer` type, that is a circular buffer with an `io.Reader` / `io.Writer` implementation (and goodies). Another type similar to this one is `RingFilter` which allows passing a slice of the unread items on each cycle to a given `func([]T) error` -- that allows filtering data / chaining readers / building data processing pipelines.
+
+#### [`RingBuffer`](./ringbuffer.go) 
+
+Acts as a circular buffer, with the same API as a [`Buffer`](./buffer.go) type. The caller defines a buffer size (and type), where all writes happen within that buffer size, wrapping around the buffer if needed. This brings the option of having a buffer that does not allocate any more memory than originally defined, if the caller is OK with discarding items if overwritten (for example, a floating-point audio signal that is not meant to be persisted or stored).
+
+```go
+  const size = 5
+  buf := gbuf.NewRingBuffer[byte](size) // create a bytes RingBuffer, of size 5
+
+  buf.Write([]byte("some string")) // buffer stores "tring"
+  
+  output := make([]byte, size)
+  _, _ = buf.Read(output) // buffer reads "tring"
+```
+
+#### [`RingFilter`](./ringfilter.go)
+
+Similar to RingBuffer, this type allows configuring a processing function that is called on every write. The buffer still stores the data the exact same way that the RingBuffer does, however all written items are also fed through this filter function.
+
+Extending the RingBuffer to have this processing function allows to create fast type converters without spending any excessive allocations. A use-case for this type is to convert an audio signal (in bytes) into its floating-point representation, while only keeping the latest written audio data as defined in the buffer size.
+
+```go
+  // max int8 value used to convert 8bit PCM audio into its floating-point representation
+  const maxInt8 float64 = 1<<7 - 1
+
+  // create a type containing both buffers
+  type converter struct {
+      ints   *gbuf.RingFilter[int8]
+      floats *gbuf.RingFilter[float64]
+  }
+  
+  // create the "output" buffer, in this case for float64, with a certain size
+  conv := converter{
+	  floats: gbuf.NewRingFilter[float64](3, nil),
+  }
+
+  // create the "input" buffer, in this case int8, that happens to be
+  // the same size (one byte per sample, on 8bit PCM audio data) 
+  conv.ints = gbuf.NewRingFilter(3, func(data []int8) error {
+	  // in this filter function, we convert the read data into its floating-point representation	  
+	  floats := make([]float64, len(data))
+	  for i := range data {
+	      floats[i] = float64(data[i]/ maxInt8)	  
+      }
+
+	  // then we write that data into the float buffer
+	  _, err := conv.floats.Write(floats)
+	  return err
+  })
+```
+
+Of course there are many open applications to these buffers, and possibly even new buffer types in the future.
