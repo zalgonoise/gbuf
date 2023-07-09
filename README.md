@@ -79,4 +79,34 @@ Extending the RingBuffer to have this processing function allows to create fast 
   })
 ```
 
+Handling streams is just as easy as leveraging the `io.ReaderFrom` / `io.WriterTo` implementations. If the stream is an `io.Reader` or `gio.Reader[T]`, the converter simply needs to contain one of the `RingFilter`:
+
+```go
+  // max int8 value used to convert 8bit PCM audio into its floating-point representation
+  const maxInt8 float64 = 1<<7 - 1
+
+  type converter struct {
+	  buf *gbuf.RingFilter[float64]
+  }
+  
+  // implement `io.ReaderFrom` where the conversion occurs, so that each write from the
+  // PCM audio byte stream is converted to its floating-point representation, written to the 
+  // converter's `*gbuf.RingFilter[float64]`
+  func (c converter) ReadFrom(b io.Reader) (n int64, err error) {
+	  buf := gbuf.NewRingFilter[byte](
+		  c.buf.Cap(),
+		  func(data []byte) error {
+			  floats := make([]float64, len(data))
+			  for i := range data {
+				  floats[i] = float64(data[i]/ maxInt8)
+			  }
+
+			  _, err := c.buf.Write(floats)
+			  return err
+		  })
+	  
+	  return buf.ReadFrom(b)
+  }
+```
+
 Of course there are many open applications to these buffers, and possibly even new buffer types in the future.
