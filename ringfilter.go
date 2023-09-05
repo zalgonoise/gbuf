@@ -12,7 +12,7 @@ import (
 // all items on each loop
 type RingFilter[T any] struct {
 	// indicates whether the write operation is currently overwriting the buffer, so that r.read follows r.write
-	isFull bool
+	full bool
 
 	write int
 	read  int
@@ -24,11 +24,15 @@ type RingFilter[T any] struct {
 func (r *RingFilter[T]) writeWithinBounds(p []T, end int) (n int, err error) {
 	n = copy(r.items[r.write:end], p)
 
-	err = r.fn(r.items[r.write:end])
+	err = r.fn(p)
+
+	if r.write < r.read && end >= r.read {
+		r.full = true
+	}
 
 	r.write = end
 
-	if r.isFull {
+	if r.full {
 		r.read = end
 	}
 
@@ -40,25 +44,22 @@ func (r *RingFilter[T]) writeWithinBounds(p []T, end int) (n int, err error) {
 }
 
 func (r *RingFilter[T]) writeWrapped(p []T, end int) (n int, err error) {
-	end %= len(r.items)
-
+	endWrapped := end % len(r.items)
 	n = copy(r.items[r.write:len(r.items)], p)
+	n += copy(r.items[:endWrapped], p[n:])
 
-	err = r.fn(r.items[r.write:len(r.items)])
+	err = r.fn(p)
 
-	n += copy(r.items[:end], p[n:])
-
-	if err != nil {
-		return n, err
+	if r.write < r.read && end >= r.read {
+		r.full = true
 	}
 
-	err = r.fn(r.items[:end])
+	r.write = endWrapped
 
-	r.write = end
-
-	if r.isFull || end > r.read {
+	if r.full || endWrapped >= r.read {
 		// overwritten items, set read point to write
 		r.read = r.write
+		r.full = true
 	}
 
 	if err != nil {
@@ -98,7 +99,7 @@ func (r *RingFilter[T]) Write(p []T) (n int, err error) {
 	copy(r.items, p[ln-ringLn:])
 	// full circle, reset read index to write point
 	r.read = r.write
-	r.isFull = true
+	r.full = true
 
 	err = r.fn(p)
 	if err != nil {
@@ -115,10 +116,10 @@ func (r *RingFilter[T]) Write(p []T) (n int, err error) {
 func (r *RingFilter[T]) WriteItem(item T) (err error) {
 	pos := (r.write + 1) % len(r.items)
 
-	if r.isFull {
+	if r.full {
 		r.read = pos
 	} else if pos == r.read {
-		r.isFull = true
+		r.full = true
 	}
 
 	r.items[r.write] = item
@@ -183,31 +184,30 @@ func (r *RingFilter[T]) WriteTo(b gio.Writer[T]) (n int64, err error) {
 // buffer has no data to return, err is io.EOF (unless len(p) is zero);
 // otherwise it is nil.
 func (r *RingFilter[T]) Read(p []T) (n int, err error) {
-	ln := len(p)
+	itemLen := len(p)
+
+	if itemLen == 0 || r.Len() == 0 {
+		return 0, nil
+	}
 
 	switch {
 	case r.read >= r.write:
 		n += copy(p, r.items[r.read:])
-		r.read = (r.read + n) % len(r.items)
+		r.full = false
 
 		// don't keep writing if there isn't enough space in p
-		if n >= ln {
+		if n >= itemLen {
+			r.read = (r.read + n) % len(r.items)
+
 			return n, nil
 		}
 
-		n += copy(p[n:n+r.write], r.items[:r.write])
-		r.read = r.write % len(r.items)
+		n += copy(p[n:], r.items[:r.write])
+		r.read = (r.read + n) % len(r.items)
 
 		return n, nil
 	default:
-		m := copy(p, r.items[r.read:r.write])
-
-		if ln < m {
-			n = ln
-		} else {
-			n = m
-		}
-
+		n = copy(p, r.items[r.read:r.write])
 		r.read += n
 
 		return n, nil
@@ -229,7 +229,7 @@ func (r *RingFilter[T]) ReadFrom(b gio.Reader[T]) (n int64, err error) {
 	for {
 		// read from r.write until the end of the RingFilter buffer
 		num, err = b.Read(r.items[r.write:len(r.items)])
-		if r.isFull {
+		if r.full {
 			r.read = r.write
 		}
 
@@ -248,7 +248,7 @@ func (r *RingFilter[T]) ReadFrom(b gio.Reader[T]) (n int64, err error) {
 			return n, ErrRingFilterNegativeRead
 		case num == len(r.items)-r.write:
 			// if the number of written items fills the buffer, the read index must follow the write index
-			r.isFull = true
+			r.full = true
 			r.read = r.write
 		}
 
@@ -287,15 +287,11 @@ func (r *RingFilter[T]) Value() (items []T) {
 // Len returns the number of T items of the unread portion of the buffer;
 // b.Len() == len(b.T items()).
 func (r *RingFilter[T]) Len() int {
-	if r.read == r.write && !r.isFull {
-		return 0
+	if r.full {
+		return len(r.items)
 	}
 
-	if r.read < r.write {
-		return r.write - r.read
-	}
-
-	return len(r.items) - (r.read - r.write)
+	return (len(r.items) + (r.write - r.read)) % len(r.items)
 }
 
 // Cap returns the length of the buffer's underlying T item slice, that is, the
