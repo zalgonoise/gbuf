@@ -3,7 +3,6 @@ package gbuf
 import (
 	"errors"
 	"io"
-	"sync/atomic"
 
 	"github.com/zalgonoise/gio"
 )
@@ -15,7 +14,7 @@ const defaultBufferSize = 256 // minimum value when unset
 // (as elements are overwritten if not read)
 type RingBuffer[T any] struct {
 	// indicates whether the write operation is currently overwriting the buffer, so that r.read follows r.write
-	followRead atomic.Bool
+	isFull bool
 
 	write int
 	read  int
@@ -27,7 +26,7 @@ func (r *RingBuffer[T]) writeWithinBounds(p []T, end int) (n int, err error) {
 	n = copy(r.items[r.write:end], p)
 	r.write = end
 
-	if r.followRead.Load() {
+	if r.isFull {
 		r.read = end
 	}
 
@@ -41,7 +40,7 @@ func (r *RingBuffer[T]) writeWrapped(p []T, end int) (n int, err error) {
 
 	r.write = end
 
-	if r.followRead.Load() || end > r.read {
+	if r.isFull || end > r.read {
 		// overwritten items, set read point to write
 		r.read = r.write
 	}
@@ -79,7 +78,7 @@ func (r *RingBuffer[T]) Write(p []T) (n int, err error) {
 	copy(r.items, p[ln-ringLn:])
 	// full circle, reset read index to write point
 	r.read = r.write
-	r.followRead.Store(true)
+	r.isFull = true
 
 	return ringLn, nil
 }
@@ -91,10 +90,10 @@ func (r *RingBuffer[T]) Write(p []T) (n int, err error) {
 func (r *RingBuffer[T]) WriteItem(item T) (err error) {
 	pos := (r.write + 1) % len(r.items)
 
-	if r.followRead.Load() {
+	if r.isFull {
 		r.read = pos
 	} else if pos == r.read {
-		r.followRead.Store(true)
+		r.isFull = true
 	}
 
 	r.items[r.write] = item
@@ -108,19 +107,11 @@ func (r *RingBuffer[T]) WriteItem(item T) (err error) {
 // buffer has no data to return, err is io.EOF (unless len(p) is zero);
 // otherwise it is nil.
 func (r *RingBuffer[T]) Read(p []T) (n int, err error) {
-	var (
-		ln     = len(p)
-		ringLn = r.Len()
-	)
+	ln := len(p)
 
 	switch {
 	case r.read >= r.write:
-		size := len(r.items) - r.read
-		if ln < ringLn {
-			size = r.write + ln
-		}
-
-		n += copy(p[:size], r.items[r.read:len(r.items)])
+		n += copy(p, r.items[r.read:])
 		r.read = (r.read + n) % len(r.items)
 
 		// don't keep writing if there isn't enough space in p
@@ -169,9 +160,12 @@ func (r *RingBuffer[T]) Value() (items []T) {
 	return items
 }
 
-// Len returns the number of T items of the unread portion of the buffer;
-// b.Len() == len(b.T items()).
+// Len returns the number of T items of the unread portion of the buffer.
 func (r *RingBuffer[T]) Len() int {
+	if r.read == r.write && !r.isFull {
+		return 0
+	}
+
 	if r.read < r.write {
 		return r.write - r.read
 	}
@@ -230,6 +224,9 @@ func (r *RingBuffer[T]) ReadFrom(b gio.Reader[T]) (n int64, err error) {
 	for {
 		// read from r.write until the end of the RingFilter buffer
 		num, err = b.Read(r.items[r.write:len(r.items)])
+		if r.isFull {
+			r.read = r.write
+		}
 
 		// early exit if io.EOF is raised
 		if errors.Is(err, io.EOF) {
@@ -244,18 +241,15 @@ func (r *RingBuffer[T]) ReadFrom(b gio.Reader[T]) (n int64, err error) {
 		switch {
 		case num < 0:
 			return n, ErrRingFilterNegativeRead
-		case num >= r.Len():
+		case num == len(r.items)-r.write:
 			// if the number of written items fills the buffer, the read index must follow the write index
-			r.followRead.Store(true)
+			r.isFull = true
+			r.read = r.write
 		}
 
 		n += int64(num)
 
 		r.write = (r.write + num) % len(r.items)
-
-		if r.followRead.Load() {
-			r.read = r.write
-		}
 	}
 }
 
