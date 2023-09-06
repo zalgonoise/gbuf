@@ -736,7 +736,7 @@ func TestRingFilter_Truncate(t *testing.T) {
 			size:        5,
 			input:       []byte("input"),
 			numTruncate: 2,
-			wants:       "put\x00\x00",
+			wants:       "\x00\x00put",
 		},
 		{
 			name:        "Simple/TruncateZero",
