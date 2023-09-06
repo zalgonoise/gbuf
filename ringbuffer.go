@@ -191,12 +191,7 @@ func (r *RingBuffer[T]) Truncate(n int) {
 	case n <= 0, n > r.Len():
 		r.Reset()
 	default:
-		for i, j := r.read, n; j > 0; i, j = (i+1)%len(r.items), j-1 {
-			var zero T
-
-			r.items[i] = zero
-			r.read = (r.read + 1) % len(r.items)
-		}
+		clear(r.items[r.read : r.read+n])
 	}
 }
 
@@ -206,13 +201,10 @@ func (r *RingBuffer[T]) Truncate(n int) {
 func (r *RingBuffer[T]) Reset() {
 	r.read = 0
 	r.write = 0
+	r.full = false
 
 	// reset the buffer preventing further reads to show the previous data
-	for i := range r.items {
-		var zero T
-
-		r.items[i] = zero
-	}
+	clear(r.items)
 }
 
 // ReadFrom reads data from b until EOF and appends it to the buffer, cycling
@@ -228,9 +220,14 @@ func (r *RingBuffer[T]) ReadFrom(b gio.Reader[T]) (n int64, err error) {
 	// read the stream's items until the reader is depleted of any more data
 	for {
 		// read from r.write until the end of the RingFilter buffer
-		num, err = b.Read(r.items[r.write:len(r.items)])
-		if r.full {
-			r.read = r.write
+		num, err = b.Read(r.items[r.write:])
+
+		if num < 0 {
+			return n, ErrRingFilterNegativeRead
+		}
+
+		if r.write < r.read && r.write+num >= r.read {
+			r.full = true
 		}
 
 		// early exit if io.EOF is raised
@@ -243,10 +240,7 @@ func (r *RingBuffer[T]) ReadFrom(b gio.Reader[T]) (n int64, err error) {
 			return n, err
 		}
 
-		switch {
-		case num < 0:
-			return n, ErrRingFilterNegativeRead
-		case num == len(r.items)-r.write:
+		if len(r.items)-(r.write-r.read) == num {
 			// if the number of written items fills the buffer, the read index must follow the write index
 			r.full = true
 			r.read = r.write
@@ -255,6 +249,10 @@ func (r *RingBuffer[T]) ReadFrom(b gio.Reader[T]) (n int64, err error) {
 		n += int64(num)
 
 		r.write = (r.write + num) % len(r.items)
+
+		if r.full {
+			r.read = r.write
+		}
 	}
 }
 
@@ -267,14 +265,14 @@ func (r *RingBuffer[T]) WriteTo(b gio.Writer[T]) (n int64, err error) {
 
 	switch {
 	case r.read >= r.write:
-		num, err = b.Write(r.items[r.read:len(r.items)])
+		num, err = b.Write(r.items[r.read:])
 
-		if n < 0 {
+		if num < 0 {
 			return n, ErrRingBufferNegativeRead
 		}
 
 		n += int64(num)
-
+		r.full = false
 		r.read = (r.read + num) % len(r.items)
 
 		if errors.Is(err, io.EOF) {
@@ -289,12 +287,12 @@ func (r *RingBuffer[T]) WriteTo(b gio.Writer[T]) (n int64, err error) {
 	default:
 		num, err = b.Write(r.items[r.read:r.write])
 
-		if n < 0 {
+		if num < 0 {
 			return n, ErrRingBufferNegativeRead
 		}
 
 		n += int64(num)
-
+		r.full = false
 		r.read = (r.read + num) % len(r.items)
 
 		if errors.Is(err, io.EOF) {
@@ -317,14 +315,16 @@ func (r *RingBuffer[T]) Next(n int) (items []T) {
 		return r.Value()
 	default:
 		items = make([]T, n)
-		_, _ = r.Read(items)
+		if _, err := r.Read(items); err != nil {
+			return nil
+		}
 
 		return items
 	}
 }
 
 func (r *RingBuffer[T]) UnreadItem() error {
-	if r.read == r.write {
+	if r.full {
 		return ErrRingBufferUnreadItem
 	}
 
@@ -336,11 +336,12 @@ func (r *RingBuffer[T]) UnreadItem() error {
 func (r *RingBuffer[T]) ReadItems(delim func(T) bool) (line []T, err error) {
 	line = make([]T, 0, len(r.items))
 
+scanLoop:
 	switch {
 	case r.read >= r.write:
 		for i := r.read; i < len(r.items); i++ {
 			if delim(r.items[i]) {
-				return line[:len(line):len(line)], nil
+				break scanLoop
 			}
 
 			line = append(line, r.items[i])
@@ -350,12 +351,19 @@ func (r *RingBuffer[T]) ReadItems(delim func(T) bool) (line []T, err error) {
 	default:
 		for i := 0; i < r.write; i++ {
 			if delim(r.items[i]) {
-				return line[:len(line):len(line)], nil
+				break scanLoop
 			}
 
 			line = append(line, r.items[i])
 		}
 	}
+
+	if len(line) == 0 {
+		return nil, nil
+	}
+
+	r.read = (r.read + len(line)) % len(r.items)
+	r.full = false
 
 	return line[:len(line):len(line)], nil
 }
@@ -365,6 +373,7 @@ func (r *RingBuffer[T]) ReadItems(delim func(T) bool) (line []T, err error) {
 func (r *RingBuffer[T]) ReadItem() (item T, err error) {
 	item = r.items[r.read]
 	r.read = (r.read + 1) % len(r.items)
+	r.full = false
 
 	return item, nil
 }
