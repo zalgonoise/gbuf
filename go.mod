@@ -1,6 +1,6 @@
 module github.com/zalgonoise/gbuf
 
-go 1.20
+go 1.21
 
 require (
 	github.com/golangci/golangci-lint v1.53.2
