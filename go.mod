@@ -1,10 +1,11 @@
 module github.com/zalgonoise/gbuf
 
-go 1.21
+go 1.21.0
 
 require (
 	github.com/golangci/golangci-lint v1.53.2
 	github.com/stretchr/testify v1.8.4
+	github.com/zalgonoise/cfg v1.0.0
 	github.com/zalgonoise/gio v0.0.0-20230218185031-8677e096e5b0
 )
 
